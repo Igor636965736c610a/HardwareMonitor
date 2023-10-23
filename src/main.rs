@@ -1,5 +1,8 @@
 #![warn(clippy::all, rust_2018_idioms)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+use std::{sync::mpsc, thread::Thread};
+use std::thread;
+use sysinfo::{NetworkExt, NetworksExt, ProcessExt, System, SystemExt};
 
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
@@ -8,9 +11,15 @@ fn main() -> eframe::Result<()> {
 
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
-        "eframe template",
+        "ProcessManager",
         native_options,
-        Box::new(|cc| Box::new(eframe_template::TemplateApp::new(cc))),
+        Box::new(|cc| {
+            let mut app = eframe_template::ProcessManagerApp::new(cc);
+            
+            app.update_cpu_info();
+            
+            Box::new(app)
+        }),
     )
 }
 
@@ -27,7 +36,7 @@ fn main() {
             .start(
                 "the_canvas_id", // hardcode it
                 web_options,
-                Box::new(|cc| Box::new(eframe_template::TemplateApp::new(cc))),
+                Box::new(|cc| Box::new(eframe_template::ProcessManagerApp::new(cc))),
             )
             .await
             .expect("failed to start eframe");
