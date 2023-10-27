@@ -16,7 +16,7 @@ fn main() -> eframe::Result<()> {
         Box::new(|cc| {
             let mut app = ProcessManager::ProcessManagerApp::new(cc);
             
-            app.update_cpu_info();
+            app.start_updating_system_info();
             
             Box::new(app)
         }),
