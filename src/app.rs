@@ -266,11 +266,11 @@ impl eframe::App for ProcessManagerApp {
                 });
                 inner_ui.separator();
                 inner_ui.vertical(|inner_ui|{
-                    mutex_data.cpus_performance_data_points.chunks(3).for_each(|x|{
+                    mutex_data.cpus_performance_data_points.chunks(4).for_each(|x|{
                         inner_ui.horizontal(|inner_ui|{
                             for ele in x {
                                 inner_ui.vertical(|inner_ui|{
-                                    inner_ui.set_min_width(100.0);
+                                    inner_ui.set_min_width(70.0);
                                     inner_ui.label(format!("{}: {}%",ele.name, ele.usage.round() as i32));
                                 });
                             }
