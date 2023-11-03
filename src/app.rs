@@ -92,20 +92,24 @@ impl ProcessManagerApp {
                     let memory = (process_manager_mutex_data.system.used_memory() as f64 / process_manager_mutex_data.system.total_memory() as f64) * 100.0;
                     let swap =  (process_manager_mutex_data.system.used_swap() as f64 / process_manager_mutex_data.system.total_swap() as f64) * 100.0;
 
-                    // println!("xxx - {}", system.load_average().one);
+                    println!("xxx - {}", process_manager_mutex_data.system.load_average().one);
 
-                    process_manager_mutex_data.system.refresh_all();
+                    // process_manager_mutex_data.system.refresh_all();
 
-                    println!("{}",process_manager_mutex_data.system.global_cpu_info().frequency());
+                    // for (pid, process) in process_manager_mutex_data.system.processes() {
+                    //     println!("[{}] {} {:?}", pid, process.name(), process.disk_usage());
+                    // }
 
-                    for component in process_manager_mutex_data.system.components() {
-                        println!("xx {:?}", component);
-                    }
+                    // println!("{}",process_manager_mutex_data.system.global_cpu_info().frequency());
 
-                    //println!("=> disks:");
-                    //for disk in system.disks() {
+                    // for component in process_manager_mutex_data.system.components() {
+                    //     println!("xx {:?}", component);
+                    // }
+
+                    // println!("=> disks:");
+                    // for disk in process_manager_mutex_data.system.disks() {
                     //    println!("{:?}", disk);
-                    //}
+                    // }
 
                     // for cpu in system.cpus() {
                     //     println!("{} - {}% ",cpu.name(), cpu.cpu_usage());
@@ -126,6 +130,10 @@ impl ProcessManagerApp {
                             panic!("xd");
                         }
                     };
+
+                    for cpu in process_manager_mutex_data.system.cpus() {
+                        println!("{}%", cpu.cpu_usage());
+                    }
 
                     process_manager_mutex_data.system.cpus().iter().for_each(|x|{
                         let cpu_data = process_manager_mutex_data.cpus_performance_data_points.iter_mut().find(|y| y.name == x.name());
@@ -257,22 +265,24 @@ impl eframe::App for ProcessManagerApp {
                     })
                 });
                 inner_ui.separator();
-                mutex_data.cpus_performance_data_points.chunks(3).for_each(|x|{
-                    inner_ui.vertical(|inner_ui|{
-                        for ele in x {
-                            inner_ui.horizontal(|inner_ui|{
-                                inner_ui.set_min_width(70.0);
-                                inner_ui.label(format!("{}: {}%",ele.name, ele.usage.round() as i32));
-                            });
-                        }
-                    });
+                inner_ui.vertical(|inner_ui|{
+                    mutex_data.cpus_performance_data_points.chunks(3).for_each(|x|{
+                        inner_ui.horizontal(|inner_ui|{
+                            for ele in x {
+                                inner_ui.vertical(|inner_ui|{
+                                    inner_ui.set_min_width(100.0);
+                                    inner_ui.label(format!("{}: {}%",ele.name, ele.usage.round() as i32));
+                                });
+                            }
+                        });
+                    })
                 })
             });
 
             ui.separator();
 
             ui.with_layout(Layout::top_down(Align::Min), |ui_test|{
-                let network_plot = Plot::new("plot2")
+                let network_plot: Plot = Plot::new("plot2")
                     .show_axes([false, true])
                     .height(0.30 * window_size.y)
                     .width(0.30 * window_size.x)
