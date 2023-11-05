@@ -14,7 +14,7 @@ fn main() -> eframe::Result<()> {
         "ProcessManager",
         native_options,
         Box::new(|cc| {
-            let mut app = ProcessManager::ProcessManagerApp::new(cc);
+            let app = ProcessManager::ProcessManagerApp::new(cc);
             
             app.start_updating_system_info();
             

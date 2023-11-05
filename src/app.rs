@@ -1,4 +1,4 @@
-use std::{collections::{btree_map::Values, VecDeque}, fmt::{Debug, Formatter}};
+use std::{collections::{btree_map::Values, VecDeque}, fmt::{Debug, Formatter}, path::Components};
 use eframe::glow::HasContext;
 use egui::{plot::{Line, Legend, Text, PlotPoint, PlotBounds}, Widget, Vec2, panel::PanelState, epaint::ahash::{HashMap, HashMapExt}};
 use egui::{containers::*, *};
@@ -20,6 +20,9 @@ pub struct ProcessManagerApp {
 
 pub struct ProcessManagerAppMutexData{
     system: System,
+    total_cpu_usage: i16,
+    memory_usage: i16,
+    swap_usage: i16,
     cpu_performance_data_points: Data<f32>,
     cpus_performance_data_points: Vec<CpuData>,
     memory_usage_data_points: Data<f32>,
@@ -32,6 +35,9 @@ impl ProcessManagerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut system = System::new_all();
         system.refresh_all();
+        for component in system.components() {
+            println!("xx {:?}", component);
+        }
         let cpu_brand = system.global_cpu_info().brand().to_string();
         let host_name = system.host_name();
         let os_version = system.os_version();
@@ -48,6 +54,9 @@ impl ProcessManagerApp {
 
         let process_manager_mutex_data = Arc::new(Mutex::new(ProcessManagerAppMutexData{
             system,
+            total_cpu_usage: 0,
+            memory_usage: 0,
+            swap_usage: 0,
             cpu_performance_data_points,
             memory_usage_data_points,
             swap_usage_data_points,
@@ -86,13 +95,18 @@ impl ProcessManagerApp {
                     process_manager_mutex_data.system.refresh_networks();
                     process_manager_mutex_data.system.refresh_disks_list();
                     process_manager_mutex_data.system.refresh_disks();
-                    process_manager_mutex_data.system.refresh_all();
+                    process_manager_mutex_data.system.refresh_components_list();
+                    process_manager_mutex_data.system.refresh_components();
+
+                    // for component in process_manager_mutex_data.system.components() {
+                    //     println!("xx {:?}", component);
+                    // }
 
                     let processor = process_manager_mutex_data.system.global_cpu_info().cpu_usage();
                     let memory = (process_manager_mutex_data.system.used_memory() as f64 / process_manager_mutex_data.system.total_memory() as f64) * 100.0;
                     let swap =  (process_manager_mutex_data.system.used_swap() as f64 / process_manager_mutex_data.system.total_swap() as f64) * 100.0;
 
-                    println!("xxx - {}", process_manager_mutex_data.system.load_average().one);
+                    // println!("xxx - {}", process_manager_mutex_data.system.load_average().one);
 
                     // process_manager_mutex_data.system.refresh_all();
 
@@ -131,9 +145,9 @@ impl ProcessManagerApp {
                         }
                     };
 
-                    for cpu in process_manager_mutex_data.system.cpus() {
-                        println!("{}%", cpu.cpu_usage());
-                    }
+                    // for cpu in process_manager_mutex_data.system.cpus() {
+                    //     println!("{}%", cpu.cpu_usage());
+                    // }
 
                     process_manager_mutex_data.system.cpus().iter().for_each(|x|{
                         let cpu_data = process_manager_mutex_data.cpus_performance_data_points.iter_mut().find(|y| y.name == x.name());
@@ -143,7 +157,7 @@ impl ProcessManagerApp {
                                 if cpu.is_display_on_plot {
                                     match &mut cpu.plot_points {
                                         Some(plot_points) => {
-                                            plot_points.push(cpu.usage)
+                                            plot_points.push(cpu.usage);
                                         }
                                         None => {
                                             let mut plot_points: Data<f32> = Data::new(20);
@@ -162,14 +176,16 @@ impl ProcessManagerApp {
                         }
                     });
 
-                    
+                    process_manager_mutex_data.total_cpu_usage = processor.round() as i16;
+                    process_manager_mutex_data.memory_usage = memory.round() as i16;
+                    process_manager_mutex_data.swap_usage = swap.round() as i16;
                     process_manager_mutex_data.cpu_performance_data_points.push(processor);
                     process_manager_mutex_data.memory_usage_data_points.push(memory as f32);
                     process_manager_mutex_data.swap_usage_data_points.push(swap as f32);
                     process_manager_mutex_data.transmitted_network_data_points.push(network_main_interface.1.transmitted() as f32);
                     process_manager_mutex_data.recived_network_data_points.push(network_main_interface.1.received() as f32)
                 }
-
+            
                 //println!("TEST1SEKUNDA");
                 thread::sleep(Duration::from_secs(1));
             }
@@ -190,59 +206,52 @@ impl eframe::App for ProcessManagerApp {
         let mut mutex_data = mutex_data_arc.lock();
 
         let cpu_points: Vec<[f64; 2]> = {
-            let cpu_performance_data_points_lock = &mutex_data.cpu_performance_data_points;
-
-            cpu_performance_data_points_lock.data_iter().enumerate().map(|(index, &i)| {
+            mutex_data.cpu_performance_data_points.data_iter().enumerate().map(|(index, &i)| {
                 [index as f64, f64::from(i)]
             }).collect()
         };
 
         let memory_points: Vec<[f64; 2]> = {
-            let memory_usage_data_points_lock = &mutex_data.memory_usage_data_points;
-            
-            memory_usage_data_points_lock.data_iter().enumerate().map(|(index, &i)| {
+            mutex_data.memory_usage_data_points.data_iter().enumerate().map(|(index, &i)| {
                 [index as f64, f64::from(i)]
             }).collect()
         };
 
         let swap_points: Vec<[f64; 2]> = {
-            let swap_usage_data_points_lock = &mutex_data.swap_usage_data_points;
-
-            swap_usage_data_points_lock.data_iter().enumerate().map(|(index, &i)| {
+            mutex_data.swap_usage_data_points.data_iter().enumerate().map(|(index, &i)| {
                 [index as f64, f64::from(i)]
             }).collect()
         };
 
         let transmitted_network_points: Vec<[f64; 2]> = {
-            let transmitted_network_data_lock = &mutex_data.transmitted_network_data_points;
-
-            transmitted_network_data_lock.data_iter().enumerate().map(|(index, &i)| {
+            mutex_data.transmitted_network_data_points.data_iter().enumerate().map(|(index, &i)| {
                 [index as f64, f64::from(i)]
             }).collect()
         };
 
         let recived_network_points: Vec<[f64; 2]> = {
-            let recived_network_data_lock = &mutex_data.recived_network_data_points;
-
-            recived_network_data_lock.data_iter().enumerate().map(|(index, &i)| {
+            mutex_data.recived_network_data_points.data_iter().enumerate().map(|(index, &i)| {
                 [index as f64, f64::from(i)]
             }).collect()
         };
         
         let plot_bounds = PlotBounds::from_min_max([0.0, 0.0], [20.0, 100.0]);
+        let mut max_y_network_plot_bound = ProcessManagerApp::find_max_y(&[&recived_network_points, &transmitted_network_points]);
+        max_y_network_plot_bound += max_y_network_plot_bound * 0.19;
 
         SidePanel::left("left_panel1").show(ctx, |ui|{
-            let plot = Plot::new("plot1")
+            ui.set_max_width(0.32 * window_size.x);
+            ui.set_max_height(0.32 * window_size.y);
+
+            let plot = Plot::new("CPU")
                 .show_axes([false, true])
-                .height(0.31 * window_size.y)
-                .width(0.31 * window_size.x)
+                .height(0.32 * window_size.y)
+                .width(0.32 * window_size.x)
                 .allow_scroll(false)
                 .allow_drag(false)
                 .legend(Legend::default().position(Corner::LeftTop))
                 .reset();
 
-            ui.set_max_width(0.31 * window_size.x);
-            ui.set_max_height(0.31 * window_size.y);
 
             let cpu_line = Line::name(Line::new(cpu_points), "cpu %");
 
@@ -256,13 +265,14 @@ impl eframe::App for ProcessManagerApp {
                 inner_ui.vertical(|inner_ui|{
                     inner_ui.horizontal(|inner_ui|{
                         inner_ui.label("CPU :");
-                        inner_ui.colored_label(Color32::RED, "1");
+                        inner_ui.colored_label(Color32::RED, format!("{}%", mutex_data.total_cpu_usage));
                     });
                     inner_ui.menu_button("plot", |inner_ui|{
                         mutex_data.cpus_performance_data_points.iter_mut().for_each(|cpu|{
                             inner_ui.checkbox(&mut cpu.is_display_on_plot, &cpu.name);
                         });
-                    })
+                    });
+                    inner_ui.set_min_width(63.0)
                 });
                 inner_ui.separator();
                 inner_ui.vertical(|inner_ui|{
@@ -282,37 +292,39 @@ impl eframe::App for ProcessManagerApp {
             ui.separator();
 
             ui.with_layout(Layout::top_down(Align::Min), |ui_test|{
-                let network_plot: Plot = Plot::new("plot2")
+                let network_plot: Plot = Plot::new("NETWORK")
                     .show_axes([false, true])
-                    .height(0.30 * window_size.y)
-                    .width(0.30 * window_size.x)
+                    .height(0.32 * window_size.y)
+                    .width(0.32 * window_size.x)
                     .allow_scroll(false)
                     .allow_drag(false)
-                    .legend(Legend::default().position(Corner::LeftTop))
+                    .legend(Legend::default().position(Corner::RightTop))
                     .reset();
 
                 let network_transmitted_line = Line::name(Line::new(transmitted_network_points), "bytes transmitted");
                 let network_recived_line = Line::name(Line::new(recived_network_points), "bytes recived");
 
-                network_plot.show(ui_test, |plot_ui|{
+
+                network_plot.show(ui_test, |plot_ui: &mut plot::PlotUi|{
                     plot_ui.line(network_transmitted_line);
                     plot_ui.line(network_recived_line);
+                    plot_ui.set_plot_bounds(PlotBounds::from_min_max([0.0, 0.0], [20.0, max_y_network_plot_bound]));
                 })
             });
         });
 
-        SidePanel::left("left_panel2").show(ctx, |ui|{
+        SidePanel::left("MEMORY").show(ctx, |ui|{
             let plot = Plot::new("plot2")
                 .show_axes([false, true])
-                .height(0.31 * window_size.y)
-                .width(0.31 * window_size.x)
+                .height(0.32 * window_size.y)
+                .width(0.32 * window_size.x)
                 .allow_scroll(false)
                 .allow_drag(false)
                 .legend(Legend::default().position(Corner::LeftTop))
                 .reset();
     
-            ui.set_max_width(0.31 * window_size.x);
-            ui.set_max_height(0.31 * window_size.y);
+            ui.set_max_width(0.32 * window_size.x);
+            ui.set_max_height(0.32 * window_size.y);
 
             let memory_line = Line::name(Line::new(memory_points), "memory %");
             let swap_line = Line::name(Line::new(swap_points), "swap %");
@@ -333,42 +345,28 @@ impl eframe::App for ProcessManagerApp {
                 ui.label("Kolumna 5");
                 ui.label("Kolumna 6");
             });
-
-            // Frame::canvas(ui.style()).show(ui, |ui| {
-            //     ui.ctx().request_repaint();
-            //     let time = ui.input(|i| i.time);
-    
-            //     let desired_size = ui.available_width() * vec2(1.0, 0.35);
-            //     let (_id, rect) = ui.allocate_space(desired_size);
-    
-            //     let to_screen =
-            //         emath::RectTransform::from_to(Rect::from_x_y_ranges(0.0..=1.0, -1.0..=1.0), rect);
-    
-            //     let mut shapes = vec![];
-    
-            //     for &mode in &[2, 3, 5] {
-            //         let mode = mode as f64;
-            //         let n = 120;
-            //         let speed = 1.5;
-    
-            //         let points: Vec<Pos2> = (0..=n)
-            //             .map(|i| {
-            //                 let t = i as f64 / (n as f64);
-            //                 let amp = (time * speed * mode).sin() / mode;
-            //                 let y = amp * (t * std::f64::consts::TAU / 2.0 * mode).sin();
-            //                 to_screen * pos2(t as f32, y as f32)
-            //             })
-            //             .collect();
-    
-            //         let thickness = 10.0 / mode as f32;
-            //         shapes.push(epaint::Shape::line(points, Stroke::new(thickness, Color32::from_additive_luminance(190))));
-            //     }
-    
-            //     ui.painter().extend(shapes);
-            // })
         });
         ctx.request_repaint();
-        //ctx.request_repaint_after(Duration::from_millis(33));
+    }
+}
+
+impl ProcessManagerApp {
+    fn find_max_y(arrays: &[&Vec<[f64; 2]>]) -> f64 {
+        let mut max_y = 0.0;
+    
+        for array in arrays {
+            for point in *array {
+                if point[1] > max_y {
+                    max_y = point[1];
+                }
+            }
+        }
+    
+        if max_y == 0.0 {
+            return 100.0;
+        }
+    
+        max_y
     }
 }
 
@@ -401,6 +399,7 @@ struct SystemInformations{
     cpu_brand: String,
     kernel_version: Option<String>,
     os_version: Option<String>,
+    // distribution: String,
     host_name: Option<String>,
 
 }
