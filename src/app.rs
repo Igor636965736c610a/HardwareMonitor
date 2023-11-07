@@ -1,9 +1,7 @@
-use std::{collections::{btree_map::Values, VecDeque}, fmt::{Debug, Formatter}, path::Components};
-use eframe::glow::HasContext;
-use egui::{plot::{Line, Legend, Text, PlotPoint, PlotBounds}, Widget, Vec2, panel::PanelState, epaint::ahash::{HashMap, HashMapExt}};
+use std::collections::VecDeque;
+use egui::plot::{Line, Legend, PlotBounds};
 use egui::{containers::*, *};
-use serde::de::value;
-use sysinfo::{NetworkExt, NetworksExt, ProcessExt, System, SystemExt, Component, ComponentExt, CpuExt, RefreshKind, Cpu};
+use sysinfo::{NetworkExt, NetworksExt,  System, SystemExt, CpuExt, DiskExt};
 use std::sync::Arc;
 use crate::app::mutex::Mutex;
 use std::thread;
@@ -13,8 +11,8 @@ use crate::app::plot::Plot;
 
 //#[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct ProcessManagerApp {
-    project: String,
     system_informations: SystemInformations,
+    cpus_columns: usize,
     process_manager_mutex_data: Arc<Mutex<ProcessManagerAppMutexData>>,
 }
 
@@ -29,15 +27,16 @@ pub struct ProcessManagerAppMutexData{
     swap_usage_data_points: Data<f32>,
     transmitted_network_data_points: Data<f32>,
     recived_network_data_points: Data<f32>,
-} 
+    network_y_plot_bound: f64
+}
 
 impl ProcessManagerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut system = System::new_all();
-        system.refresh_all();
         for component in system.components() {
             println!("xx {:?}", component);
         }
+        system.refresh_all();
         let cpu_brand = system.global_cpu_info().brand().to_string();
         let host_name = system.host_name();
         let os_version = system.os_version();
@@ -63,14 +62,12 @@ impl ProcessManagerApp {
             transmitted_network_data_points,
             recived_network_data_points,
             cpus_performance_data_points,
+            network_y_plot_bound: 100.0
         }));
 
-        
-        let project = "ProcessManager".to_owned();
-
         Self {
-            project,
             process_manager_mutex_data,
+            cpus_columns: 4,
             system_informations: SystemInformations { 
                 cpu_brand,
                 kernel_version,
@@ -149,6 +146,33 @@ impl ProcessManagerApp {
                     //     println!("{}%", cpu.cpu_usage());
                     // }
 
+                    println!("=> disks:");
+                    for disk in process_manager_mutex_data.system.disks() {
+                        println!("name {}", disk.name().to_string_lossy().to_string());
+                        println!("available_space {}", disk.available_space());
+                        let file_system = match std::str::from_utf8(disk.file_system()) {
+                            Ok(value) => {
+                                value
+                            }
+                            Err(_) => {
+                                panic!("nie panikuj!")
+                            }
+                        };
+                        println!("file_system {}", file_system);
+                        println!("is_removable {}", disk.is_removable());
+                        println!("mount_point {}", disk.mount_point().to_string_lossy().to_string());
+                        println!("total_space {}", disk.total_space());
+                        println!("kind {:?}", disk.kind());
+                        println!("");
+                    }
+
+                    println!("");
+                    println!("ORIGINAL");
+                    println!("=> disks:");
+                    for disk in process_manager_mutex_data.system.disks() {
+                        println!("{:?}", disk);
+                    }
+
                     process_manager_mutex_data.system.cpus().iter().for_each(|x|{
                         let cpu_data = process_manager_mutex_data.cpus_performance_data_points.iter_mut().find(|y| y.name == x.name());
                         match cpu_data {
@@ -183,7 +207,19 @@ impl ProcessManagerApp {
                     process_manager_mutex_data.memory_usage_data_points.push(memory as f32);
                     process_manager_mutex_data.swap_usage_data_points.push(swap as f32);
                     process_manager_mutex_data.transmitted_network_data_points.push(network_main_interface.1.transmitted() as f32);
-                    process_manager_mutex_data.recived_network_data_points.push(network_main_interface.1.received() as f32)
+                    process_manager_mutex_data.recived_network_data_points.push(network_main_interface.1.received() as f32);
+
+                    let recived_max = process_manager_mutex_data.recived_network_data_points.data_iter()
+                        .max_by(|a, b| a.total_cmp(b)).unwrap_or(&100.0).max(100.0);
+                    let transmitted_max = process_manager_mutex_data.transmitted_network_data_points.data_iter()
+                        .max_by(|a, b| a.total_cmp(b)).unwrap_or(&100.0).max(100.0);
+                    
+                    process_manager_mutex_data.network_y_plot_bound = if recived_max > transmitted_max {
+                        recived_max as f64
+                    } else {
+                        transmitted_max as f64
+                    }
+                    
                 }
             
                 //println!("TEST1SEKUNDA");
@@ -236,7 +272,7 @@ impl eframe::App for ProcessManagerApp {
         };
         
         let plot_bounds = PlotBounds::from_min_max([0.0, 0.0], [20.0, 100.0]);
-        let mut max_y_network_plot_bound = ProcessManagerApp::find_max_y(&[&recived_network_points, &transmitted_network_points]);
+        let mut max_y_network_plot_bound = mutex_data.network_y_plot_bound;
         max_y_network_plot_bound += max_y_network_plot_bound * 0.19;
 
         SidePanel::left("left_panel1").show(ctx, |ui|{
@@ -249,7 +285,7 @@ impl eframe::App for ProcessManagerApp {
                 .width(0.32 * window_size.x)
                 .allow_scroll(false)
                 .allow_drag(false)
-                .legend(Legend::default().position(Corner::LeftTop))
+                .legend(Legend::default().position(Corner::LeftTop).background_alpha(0.0))
                 .reset();
 
 
@@ -257,31 +293,48 @@ impl eframe::App for ProcessManagerApp {
 
             plot.show(ui, |plot_ui|{
                 plot_ui.line(cpu_line);
+
+                mutex_data.cpus_performance_data_points.iter().for_each(|x|{
+                    match &x.plot_points {
+                        Some(points) => {
+                            let inner_points: Vec<[f64; 2]> = points.data_iter().enumerate().map(|(index, &i)| {
+                                [index as f64, f64::from(i)]
+                            }).collect();
+                            plot_ui.line(Line::new(inner_points).name(&x.name));
+                        }
+                        None => {         
+                        }
+                    };
+                });
+
                 plot_ui.set_plot_bounds(plot_bounds);
             });
-            
-            
+        
             ui.horizontal(|inner_ui|{
                 inner_ui.vertical(|inner_ui|{
                     inner_ui.horizontal(|inner_ui|{
-                        inner_ui.label("CPU :");
-                        inner_ui.colored_label(Color32::RED, format!("{}%", mutex_data.total_cpu_usage));
+                        inner_ui.label(RichText::new("CPU :"));
+                        inner_ui.colored_label(Color32::RED, RichText::new(format!("{}%", mutex_data.total_cpu_usage)));
                     });
                     inner_ui.menu_button("plot", |inner_ui|{
                         mutex_data.cpus_performance_data_points.iter_mut().for_each(|cpu|{
                             inner_ui.checkbox(&mut cpu.is_display_on_plot, &cpu.name);
                         });
                     });
+                    inner_ui.add_space(3.0);
+                    inner_ui.add(egui::DragValue::new(&mut self.cpus_columns).speed(0.03).clamp_range(1.0..=4.0).suffix(" columns"));
                     inner_ui.set_min_width(63.0)
                 });
                 inner_ui.separator();
                 inner_ui.vertical(|inner_ui|{
-                    mutex_data.cpus_performance_data_points.chunks(4).for_each(|x|{
+                    inner_ui.add_space(3.5);
+                    mutex_data.cpus_performance_data_points.chunks(self.cpus_columns).for_each(|x|{
                         inner_ui.horizontal(|inner_ui|{
                             for ele in x {
                                 inner_ui.vertical(|inner_ui|{
                                     inner_ui.set_min_width(70.0);
                                     inner_ui.label(format!("{}: {}%",ele.name, ele.usage.round() as i32));
+                                    inner_ui.add_space(0.7);
                                 });
                             }
                         });
@@ -291,21 +344,33 @@ impl eframe::App for ProcessManagerApp {
 
             ui.separator();
 
-            ui.with_layout(Layout::top_down(Align::Min), |ui_test|{
+            ui.label(RichText::new(&self.system_informations.cpu_brand).heading());
+            match &self.system_informations.os_version {
+                Some(value) => ui.label(RichText::new(format!("os version: {}", value))),
+                _ => { return; }
+            };
+            match &self.system_informations.kernel_version {
+                Some(value) => ui.label(RichText::new(format!("kernel version: {}", value))),
+                _ => { return; }
+            };
+
+            ui.separator();
+
+            ui.with_layout(Layout::top_down(Align::Min), |ui|{
                 let network_plot: Plot = Plot::new("NETWORK")
                     .show_axes([false, true])
                     .height(0.32 * window_size.y)
                     .width(0.32 * window_size.x)
                     .allow_scroll(false)
                     .allow_drag(false)
-                    .legend(Legend::default().position(Corner::RightTop))
+                    .legend(Legend::default().position(Corner::RightTop).background_alpha(0.0))
                     .reset();
 
                 let network_transmitted_line = Line::name(Line::new(transmitted_network_points), "bytes transmitted");
                 let network_recived_line = Line::name(Line::new(recived_network_points), "bytes recived");
 
 
-                network_plot.show(ui_test, |plot_ui: &mut plot::PlotUi|{
+                network_plot.show(ui, |plot_ui: &mut plot::PlotUi|{
                     plot_ui.line(network_transmitted_line);
                     plot_ui.line(network_recived_line);
                     plot_ui.set_plot_bounds(PlotBounds::from_min_max([0.0, 0.0], [20.0, max_y_network_plot_bound]));
@@ -320,7 +385,7 @@ impl eframe::App for ProcessManagerApp {
                 .width(0.32 * window_size.x)
                 .allow_scroll(false)
                 .allow_drag(false)
-                .legend(Legend::default().position(Corner::LeftTop))
+                .legend(Legend::default().position(Corner::LeftTop).background_alpha(0.0))
                 .reset();
     
             ui.set_max_width(0.32 * window_size.x);
@@ -347,26 +412,6 @@ impl eframe::App for ProcessManagerApp {
             });
         });
         ctx.request_repaint();
-    }
-}
-
-impl ProcessManagerApp {
-    fn find_max_y(arrays: &[&Vec<[f64; 2]>]) -> f64 {
-        let mut max_y = 0.0;
-    
-        for array in arrays {
-            for point in *array {
-                if point[1] > max_y {
-                    max_y = point[1];
-                }
-            }
-        }
-    
-        if max_y == 0.0 {
-            return 100.0;
-        }
-    
-        max_y
     }
 }
 
@@ -409,12 +454,4 @@ struct CpuData{
     usage: f32,
     is_display_on_plot: bool,
     plot_points: Option<Data<f32>>
-}
-
-struct SoundManager;
-
-impl SoundManager {
-    fn get_volume() {
-        println!("dupa");
-    }
 }

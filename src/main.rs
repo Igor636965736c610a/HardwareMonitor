@@ -1,8 +1,5 @@
 #![warn(clippy::all, rust_2018_idioms)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
-use std::{sync::mpsc, thread::Thread};
-use std::thread;
-use sysinfo::{NetworkExt, NetworksExt, ProcessExt, System, SystemExt};
 
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
