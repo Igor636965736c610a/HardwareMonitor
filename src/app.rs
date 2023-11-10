@@ -31,9 +31,6 @@ pub struct ProcessManagerAppMutexData{
 impl ProcessManagerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut system = System::new_all();
-        for component in system.components() {
-            println!("xx {:?}", component);
-        }
         system.refresh_all();
         let cpu_brand = system.global_cpu_info().brand().to_string();
         let host_name = system.host_name();
@@ -47,10 +44,7 @@ impl ProcessManagerApp {
                     interface_name: x.0.to_string(),
                     mac_address: x.1.mac_address(),
                     is_display_on_plot: true,
-                    recived_plot_points: None,
-                    transmitted_plot_points: None,
-                    recived_bytes: 0,
-                    transmitted_bytes: 0,
+                    network_display: None,
                     total_errors_on_recived: 0,
                     total_errors_on_transmitted: 0,
                 }
@@ -118,6 +112,9 @@ impl ProcessManagerApp {
 
                     // process_manager_mutex_data.system.refresh_all();
 
+                    println!("{} {:?} {:?}", process_manager_mutex_data.system.distribution_id(), process_manager_mutex_data.system.long_os_version(), process_manager_mutex_data.system.name());
+                    
+
                     // for (pid, process) in process_manager_mutex_data.system.processes() {
                     //     println!("[{}] {} {:?}", pid, process.name(), process.disk_usage());
                     // }
@@ -145,10 +142,10 @@ impl ProcessManagerApp {
                     //     println!("{}%", cpu.cpu_usage());
                     // }
 
-                    println!("=> networks:");
-                    for (interface_name, data) in process_manager_mutex_data.system.networks() {
-                        println!("{}: {}/{} B", data.mac_address(), data.received(), data.transmitted());
-                    }
+                    // println!("=> networks:");
+                    // for (interface_name, data) in process_manager_mutex_data.system.networks() {
+                    //     println!("{}: {}/{} B", data.mac_address(), data.received(), data.transmitted());
+                    // }
 
                     // println!("=> disks:");
                     // for disk in process_manager_mutex_data.system.disks() {
@@ -215,33 +212,36 @@ impl ProcessManagerApp {
                             .find(|y| y.1.mac_address().eq(&x.mac_address));
                         match net_data {
                             Some(data) => {
+                                x.total_errors_on_recived = data.1.total_errors_on_received();
+                                x.total_errors_on_transmitted = data.1.total_errors_on_transmitted();
                                 if x.is_display_on_plot {
-                                    x.recived_bytes = data.1.received();
-                                    x.transmitted_bytes = data.1.transmitted();
-                                    match &mut x.recived_plot_points {
-                                        Some(points) => {
-                                            points.push(data.1.received());
+                                let recived = data.1.received();
+                                let transmitted = data.1.transmitted();
+                                    match &mut x.network_display {
+                                        Some(value) => {
+                                            value.recived_bytes = recived;
+                                            value.transmitted_bytes = transmitted;
+                                            value.recived_plot_points.push(recived);
+                                            value.transmitted_plot_points.push(transmitted);
                                         }
                                         None => {
-                                            let mut plot_points: Data<u64> = Data::new(20);
-                                            plot_points.push(data.1.received());
-                                            x.recived_plot_points = Some(plot_points);
-                                        }
-                                    }
-                                    match &mut x.transmitted_plot_points {
-                                        Some(points) => {
-                                            points.push(data.1.transmitted());
-                                        }
-                                        None => {
-                                            let mut plot_points: Data<u64> = Data::new(20);
-                                            plot_points.push(data.1.transmitted());
-                                            x.transmitted_plot_points = Some(plot_points);
+                                            let mut recived_points = Data::new(20);
+                                            let mut transmitted_points = Data::new(20);
+                                            recived_points.push(recived);
+                                            transmitted_points.push(transmitted);
+                                            let network_display = NetworkDisplay {
+                                                recived_bytes: recived,
+                                                transmitted_bytes: transmitted,
+                                                recived_plot_points: recived_points,
+                                                transmitted_plot_points: transmitted_points
+                                            };
+
+                                            x.network_display = Some(network_display);
                                         }
                                     }
                                 }
                                 else {
-                                    x.recived_plot_points = None;
-                                    x.transmitted_plot_points = None;
+                                    x.network_display = None;
                                 }
                             }
                             None => {
@@ -253,9 +253,9 @@ impl ProcessManagerApp {
                     let mut net_y_bound: u64 = 100;
     
                     for info in &process_manager_mutex_data.network_informations {
-                        if let Some(data) = &info.recived_plot_points {
+                        if let Some(data) = &info.network_display {
                             if info.is_display_on_plot {
-                                for value in &data.data_records {
+                                for value in data.recived_plot_points.data_iter() {
                                     if *value > net_y_bound {
                                         net_y_bound = *value;
                                     }
@@ -264,9 +264,9 @@ impl ProcessManagerApp {
                         }
                     }
                     for info in &process_manager_mutex_data.network_informations {
-                        if let Some(data) = &info.transmitted_plot_points {
+                        if let Some(data) = &info.network_display {
                             if info.is_display_on_plot {
-                                for value in &data.data_records {
+                                for value in data.transmitted_plot_points.data_iter() {
                                     if *value > net_y_bound {
                                         net_y_bound = *value;
                                     }
@@ -343,7 +343,6 @@ impl eframe::App for ProcessManagerApp {
                 .allow_drag(false)
                 .legend(Legend::default().position(Corner::LeftTop).background_alpha(0.0))
                 .reset();
-
 
             let cpu_line = Line::name(Line::new(cpu_points), "cpu %");
 
@@ -428,43 +427,83 @@ impl eframe::App for ProcessManagerApp {
 
                 network_plot.show(ui, |plot_ui: &mut plot::PlotUi|{
                     mutex_data.network_informations.iter().for_each(|x| {
-                        match &x.transmitted_plot_points {
+                        match &x.network_display {
                             Some(points) => {
+                                
                                 let transmitted_line: Vec<[f64; 2]> = {
-                                    points.data_iter().enumerate().map(|(index, &i)| {
+                                    points.transmitted_plot_points.data_iter().enumerate().map(|(index, &i)| {
                                         [index as f64, i as f64]
                                     }).collect()
                                 };
-                                let name = format!("{}. bytes transmitted", x.number);
-                                plot_ui.line(Line::new(transmitted_line).name(name));
+                                let recived_line: Vec<[f64; 2]> = {
+                                    points.recived_plot_points.data_iter().enumerate().map(|(index, &i)| {
+                                        [index as f64, i as f64]
+                                    }).collect()
+                                };
+                                plot_ui.line(Line::new(transmitted_line).name(format!("{}. bytes transmitted", x.number)));
+                                plot_ui.line(Line::new(recived_line).name(format!("{}. bytes recived", x.number)));
+                                // let transmitted_line: Vec<[f64; 2]> = {
+                                //     points.data_iter().enumerate().map(|(index, &i)| {
+                                //         [index as f64, i as f64]
+                                //     }).collect()
+                                // };
+                                // let name = format!("{}. bytes transmitted", x.number);
+                                // plot_ui.line(Line::new(transmitted_line).name(name));
                             }
                             None => {
                             }                         
-                        }
-                        match &x.recived_plot_points {
-                            Some(points) => {
-                                let recived_line: Vec<[f64; 2]> = {
-                                    points.data_iter().enumerate().map(|(index, &i)| {
-                                        [index as f64, i as f64]
-                                    }).collect()
-                                };
-                                let name = format!("{}. bytes recived", x.number);
-                                plot_ui.line(Line::new(recived_line).name(name));
-                            }
-                            None => {
-                            } 
                         }
                     });
                     plot_ui.set_plot_bounds(PlotBounds::from_min_max([0.0, 0.0], [20.0, max_y_network_plot_bound]));
                 })
             });
 
-            ui.menu_button("networks", |inner_ui|{
+            ui.vertical_centered(|inner_ui| {
                 mutex_data.network_informations.iter_mut().for_each(|net|{
-                    let text = format!("{}. {}{}{}", net.number, net.interface_name, "\n", net.mac_address);
-                    inner_ui.checkbox(&mut net.is_display_on_plot, text);
+                    inner_ui.horizontal(|inner_ui| {
+                        inner_ui.checkbox(&mut net.is_display_on_plot, "");
+                        inner_ui.vertical(|inner_ui| {
+                            let mut t1 = RichText::new(format!("{}. {} {}", net.number, net.interface_name, net.mac_address));
+                            let mut t2 = RichText::new(format!("{}", net.mac_address));
+                            if !net.is_display_on_plot {
+                                t1 = t1.weak();
+                                t2 = t2.weak();
+                            }
+                            
+
+                            // egui::Grid::new("test").max_col_width(400.0).min_col_width(20.0).show(inner_ui, |col_ui| {
+                            //     col_ui.label(t1);
+                            //     col_ui.label(t2);
+                            // })
+                            inner_ui.label(t1);
+
+                            match &net.network_display {
+                                Some(value) => {
+                                    inner_ui.horizontal(|inner_ui| {
+                                        inner_ui.label(t2);
+                                        // add space
+                                        inner_ui.colored_label(Color32, value.recived_bytes)
+                                        inner_ui.colored_label(Color32, value.recived_bytes) 
+                                        // TO DO 
+                                    });
+                                }
+                                None => {
+                                    inner_ui.label(t2);
+                                }
+                            }
+                            inner_ui.separator();
+                        })
+
+                    });
                 });
             });
+
+            // ui.menu_button("networks", |inner_ui|{
+            //     mutex_data.network_informations.iter_mut().for_each(|net|{
+            //         let text = format!("{}. {}{}{}", net.number, net.interface_name, "\n", net.mac_address);
+            //         inner_ui.checkbox(&mut net.is_display_on_plot, text);
+            //     });
+            // });
         });
 
         SidePanel::left("MEMORY").show(ctx, |ui|{
@@ -560,10 +599,14 @@ struct NetworkInformations {
     interface_name: String,
     mac_address: MacAddr,
     is_display_on_plot: bool,
-    recived_plot_points: Option<Data<u64>>,
-    transmitted_plot_points: Option<Data<u64>>,
-    recived_bytes: u64,
-    transmitted_bytes: u64,
+    network_display: Option<NetworkDisplay>,
     total_errors_on_recived: u64,
     total_errors_on_transmitted: u64,
+}
+
+struct NetworkDisplay {
+    recived_plot_points: Data<u64>,
+    transmitted_plot_points: Data<u64>,
+    recived_bytes: u64,
+    transmitted_bytes: u64,
 }
