@@ -1,13 +1,11 @@
 use std::collections::VecDeque;
 use egui::epaint::Hsva;
-use egui::text::{LayoutJob, Fonts};
-use egui::widget_text::WidgetTextJob;
-use egui::{SidePanel, RichText, Color32, Layout, Align, plot, Grid, TextFormat, TextEdit, Widget, WidgetText, FontId, FontFamily,};
-use egui::plot::{Line, Legend, PlotBounds, Plot, Corner};
+use egui::{SidePanel, RichText, Color32, Layout, Align, plot};
+use egui::plot::{Line, Legend, PlotBounds, Plot, Corner, PlotPoints};
 use sysinfo::{NetworkExt, NetworksExt,  System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::{thread, default};
+use std::thread;
 use core::time::Duration;
 
 //#[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -60,19 +58,18 @@ impl ProcessManagerApp {
         };
         let disks_informations = sys.disks().iter().map(|x|{
             DiskInformations{
-                name: format!("{:?}", x.name()), //DiskExt::name(x).to_string_lossy().to_string(),
-                available_space: x.available_space(),  //DiskExt::available_space(x),
-                file_system: format!("{:?}", x.file_system()),
-                // file_system: match std::str::from_utf8(x.file_system()) {
-                //     Ok(value) => {
-                //         value.to_string()
-                //     }
-                //     Err(_) => {
-                //         panic!("nie panikuj!")
-                //     }
-                // },
+                name: format!("{:?}", x.name()).replace("\"", ""),
+                available_space: x.available_space(),
+                file_system: match std::str::from_utf8(x.file_system()) {
+                    Ok(value) => {
+                        value.to_string()
+                    }
+                    Err(_) => {
+                        panic!("nie panikuj!")
+                    }
+                },
                 is_removable: if x.is_removable() { String::from("yes") } else { String::from("no") },
-                mount_point: format!("{:?}", x.mount_point()), //x.mount_point().to_string_lossy().to_string(),
+                mount_point: format!("{:?}", x.mount_point()).replace("\"", ""),
                 total_space: x.total_space(),
                 kind: format!("{:?}", x.kind())
             }
@@ -135,12 +132,6 @@ impl ProcessManagerApp {
                 {
                     let process_manager_mutex_data = &mut *arc_process_manager_mutex_data.lock().unwrap();
 
-                    // sys.refresh_cpu();
-                    // sys.refresh_memory();
-                    // sys.refresh_networks_list();
-                    // sys.refresh_networks();
-                    // sys.refresh_disks_list();
-                    // sys.refresh_disks();
                     sys.refresh_specifics(RefreshKind::everything()
                         .without_components()
                         .without_components_list()
@@ -313,8 +304,6 @@ impl ProcessManagerApp {
                     
                     process_manager_mutex_data.network_y_plot_bound = net_y_bound as f64;              
                 }
-            
-                //println!("TEST1SEKUNDA");
                 thread::sleep(Duration::from_secs(1));
             }
         });
@@ -322,9 +311,7 @@ impl ProcessManagerApp {
     }
 
     pub fn bytes_to_gigabytes(bytes: u64) -> f64 {
-        let x = (bytes as f64 / 1_073_741_824.0);
-        println!("{}", x);
-        x
+        bytes as f64 / 1_073_741_824.0
     }
 }
 
@@ -371,8 +358,7 @@ impl eframe::App for ProcessManagerApp {
                 .width(0.32 * window_size.x)
                 .allow_scroll(false)
                 .allow_drag(false)
-                .legend(Legend::default().position(Corner::LeftTop).background_alpha(0.0))
-                .reset();
+                .legend(Legend::default().position(Corner::LeftTop).background_alpha(0.0));
 
             let cpu_line = Line::name(Line::new(cpu_points), "cpu %");
 
@@ -498,7 +484,7 @@ impl eframe::App for ProcessManagerApp {
         });
 
         SidePanel::left("MEMORY").show(ctx, |ui|{
-            let plot = Plot::new("plot2")
+            let plot = Plot::new("memory_plot")
                 .show_axes([false, true])
                 .height(0.32 * window_size.y)
                 .width(0.32 * window_size.x)
@@ -515,25 +501,81 @@ impl eframe::App for ProcessManagerApp {
                 plot_ui.line(Line::new(swap_points).name("swap %"));
                 plot_ui.set_plot_bounds(plot_bounds);
             });
+
+            ui.add_space(2.0);
+
+            let mut memory_section_width: f32 = 0.0;
+
             ui.vertical(|inner_ui|{
                 inner_ui.horizontal(|inner_ui|{
-                    
-                    inner_ui.group(|inner_ui|{
+                    let memory_group = inner_ui.group(|inner_ui|{
                         inner_ui.label(RichText::new("Memory used:"));
                         inner_ui.label(RichText::new(format!("{:.2} GB", ProcessManagerApp::bytes_to_gigabytes(mutex_data.memory_usage))).color(Color32::RED));
                         inner_ui.label("/");
                         inner_ui.label(format!("{:.2} GB", ProcessManagerApp::bytes_to_gigabytes(self.memory_informations.total_memory)));
                     });
                     
-                    inner_ui.group(|inner_ui|{
+                    let swap_group = inner_ui.group(|inner_ui|{
                         inner_ui.label(RichText::new("Swap used:"));
                         inner_ui.label(RichText::new(format!("{:.2} GB", ProcessManagerApp::bytes_to_gigabytes(mutex_data.swap_usage))).color(Color32::LIGHT_BLUE));
                         inner_ui.label("/");
                         inner_ui.label(format!("{:.2} GB", ProcessManagerApp::bytes_to_gigabytes(self.memory_informations.total_swap)));
                     });
+                    memory_section_width = memory_group.response.rect.width() + swap_group.response.rect.width();
+                })
+            });
+
+            ui.add_space(1.0);
+
+            ui.separator();
+
+            ui.vertical(|inner_ui|{
+                match &self.system_informations.host_name {
+                    Some(value) => {
+                        inner_ui.horizontal(|inner_ui|{
+                            inner_ui.label(RichText::new("Host name:"));
+                            inner_ui.label(format!("{}", value));
+                        });
+                    }
+                    None => {
+                    }
+                }
+                inner_ui.horizontal(|inner_ui|{
+                    inner_ui.label(RichText::new("System:"));
+                    inner_ui.label(format!("{}", self.system_informations.system_version_full_name));
                 });
             });
 
+            ui.separator();
+
+            ui.label(RichText::new("Disks:").heading());
+
+            mutex_data.disks_informations.iter().enumerate().for_each(|(i, disk)|{
+                ui.group(|inner_ui|{
+                    inner_ui.set_width(memory_section_width);
+
+                    inner_ui.horizontal(|inner_ui|{
+                        inner_ui.vertical(|inner_ui|{
+                            inner_ui.label(format!("{}", disk.name));
+                            inner_ui.label(format!("{}", disk.kind));
+                            inner_ui.label(format!("{}", disk.available_space));
+                            inner_ui.label(format!("{}", disk.is_removable));
+                            inner_ui.label(format!("{}", disk.file_system));
+                            inner_ui.label(format!("{}", disk.mount_point));
+                            inner_ui.label(format!("{}", disk.total_space));        
+                        });
+                        Plot::new(i)
+                            .show_axes([false, true])
+                            .allow_scroll(false)
+                            .allow_drag(false)
+                            .show(inner_ui, |plot_ui|{
+                                plot_ui.line(Line::new(PlotPoints::default()));
+                                plot_ui.set_plot_bounds(plot_bounds);
+                                
+                            });
+                    });
+                });
+            });
             // Grid::new("grid1").striped(true)
             // .num_columns(6)
             // .show(ui, |ui| {
@@ -545,7 +587,8 @@ impl eframe::App for ProcessManagerApp {
             //     ui.label("Kolumna 6");
             // });
         });
-        ctx.request_repaint();
+        ctx.request_repaint_after(Duration::from_millis(1));
+        //ctx.request_repaint();
     }
 }
 
