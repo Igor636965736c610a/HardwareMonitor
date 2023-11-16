@@ -1,31 +1,33 @@
 use std::collections::VecDeque;
-use egui::epaint::{Hsva};
-use egui::{SidePanel, RichText, Color32, Layout, Align, plot, Grid,};
-use egui::plot::{Line, Legend, PlotBounds, Plot};
-use sysinfo::{NetworkExt, NetworksExt,  System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt};
+use egui::epaint::Hsva;
+use egui::text::{LayoutJob, Fonts};
+use egui::widget_text::WidgetTextJob;
+use egui::{SidePanel, RichText, Color32, Layout, Align, plot, Grid, TextFormat, TextEdit, Widget, WidgetText, FontId, FontFamily,};
+use egui::plot::{Line, Legend, PlotBounds, Plot, Corner};
+use sysinfo::{NetworkExt, NetworksExt,  System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::thread;
+use std::{thread, default};
 use core::time::Duration;
-use egui::plot::Corner;
 
 //#[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct ProcessManagerApp {
     cpu_informations: CpuInformations,
     system_informations: SystemInformations,
-    disks_informations: Vec<DiskInformations>,
+    memory_informations: MemoryInformations,
     cpus_columns: usize,
     process_manager_mutex_data: Arc<Mutex<ProcessManagerAppMutexData>>,
 }
 
 pub struct ProcessManagerAppMutexData{
-    total_cpu_usage: i16,
-    memory_usage: i16,
-    swap_usage: i16,
+    total_cpu_usage: u64,
+    memory_usage: u64,
+    swap_usage: u64,
     network_informations: Vec<NetworkInformations>,
     cpu_performance_data_points: Data<f32>,
     cpus_performance_data_points: Vec<CpuData>,
     memory_usage_data_points: Data<f32>,
+    disks_informations: Vec<DiskInformations>,
     swap_usage_data_points: Data<f32>,
     network_y_plot_bound: f64
 }
@@ -75,6 +77,10 @@ impl ProcessManagerApp {
                 kind: format!("{:?}", x.kind())
             }
         }).collect();
+        let memory_informations = MemoryInformations{
+            total_memory: sys.total_memory(),
+            total_swap: sys.total_swap(),
+        };
         let network_informations = sys.networks().iter()
             .enumerate()
             .map(|(i, x)|{
@@ -103,13 +109,14 @@ impl ProcessManagerApp {
             swap_usage_data_points,
             cpus_performance_data_points,
             network_informations,
+            disks_informations,
             network_y_plot_bound: 100.0
         }));
 
         Self {
             process_manager_mutex_data,
             system_informations,
-            disks_informations,
+            memory_informations,
             cpus_columns: 4,
             cpu_informations: CpuInformations { 
                 cpu_brand,
@@ -128,14 +135,16 @@ impl ProcessManagerApp {
                 {
                     let process_manager_mutex_data = &mut *arc_process_manager_mutex_data.lock().unwrap();
 
-                    sys.refresh_cpu();
-                    sys.refresh_memory();
-                    sys.refresh_networks_list();
-                    sys.refresh_networks();
-                    sys.refresh_disks_list();
-                    sys.refresh_disks();
-                    sys.refresh_components_list();
-                    sys.refresh_components();
+                    // sys.refresh_cpu();
+                    // sys.refresh_memory();
+                    // sys.refresh_networks_list();
+                    // sys.refresh_networks();
+                    // sys.refresh_disks_list();
+                    // sys.refresh_disks();
+                    sys.refresh_specifics(RefreshKind::everything()
+                        .without_components()
+                        .without_components_list()
+                        .without_users_list());
 
                     // for component in process_manager_mutex_data.system.components() {
                     //     println!("xx {:?}", component);
@@ -149,7 +158,7 @@ impl ProcessManagerApp {
 
                     // process_manager_mutex_data.system.refresh_all();
 
-                    println!("{} {:?} {:?}", sys.distribution_id(), sys.long_os_version(), sys.name());
+                    // println!("{} {:?} {:?}", sys.distribution_id(), sys.long_os_version(), sys.name());
                     
 
                     // for (pid, process) in process_manager_mutex_data.system.processes() {
@@ -238,13 +247,13 @@ impl ProcessManagerApp {
                         }
                     });
 
-                    process_manager_mutex_data.total_cpu_usage = processor.round() as i16;
-                    process_manager_mutex_data.memory_usage = memory.round() as i16;
-                    process_manager_mutex_data.swap_usage = swap.round() as i16;
+                    process_manager_mutex_data.total_cpu_usage = processor.round() as u64;
+                    process_manager_mutex_data.memory_usage = sys.used_memory();
+                    process_manager_mutex_data.swap_usage = sys.used_swap();
                     process_manager_mutex_data.cpu_performance_data_points.push(processor);
                     process_manager_mutex_data.memory_usage_data_points.push(memory as f32);
                     process_manager_mutex_data.swap_usage_data_points.push(swap as f32);
-                    process_manager_mutex_data.network_informations.iter_mut().for_each(|x| {
+                    process_manager_mutex_data.network_informations.iter_mut().for_each(|x: &mut NetworkInformations| {
                         let net_data = sys.networks().iter()
                             .find(|y| y.1.mac_address().eq(&x.mac_address));
                         match net_data {
@@ -310,6 +319,12 @@ impl ProcessManagerApp {
             }
         });
         println!("test")
+    }
+
+    pub fn bytes_to_gigabytes(bytes: u64) -> f64 {
+        let x = (bytes as f64 / 1_073_741_824.0);
+        println!("{}", x);
+        x
     }
 }
 
@@ -500,19 +515,35 @@ impl eframe::App for ProcessManagerApp {
                 plot_ui.line(Line::new(swap_points).name("swap %"));
                 plot_ui.set_plot_bounds(plot_bounds);
             });
-
-            
-
-            Grid::new("grid1").striped(true)
-            .num_columns(6)
-            .show(ui, |ui| {
-                ui.label("Kolumna 1");
-                ui.label("Kolumna 2");
-                ui.label("Kolumna 3");
-                ui.label("Kolumna 4");
-                ui.label("Kolumna 5");
-                ui.label("Kolumna 6");
+            ui.vertical(|inner_ui|{
+                inner_ui.horizontal(|inner_ui|{
+                    
+                    inner_ui.group(|inner_ui|{
+                        inner_ui.label(RichText::new("Memory used:"));
+                        inner_ui.label(RichText::new(format!("{:.2} GB", ProcessManagerApp::bytes_to_gigabytes(mutex_data.memory_usage))).color(Color32::RED));
+                        inner_ui.label("/");
+                        inner_ui.label(format!("{:.2} GB", ProcessManagerApp::bytes_to_gigabytes(self.memory_informations.total_memory)));
+                    });
+                    
+                    inner_ui.group(|inner_ui|{
+                        inner_ui.label(RichText::new("Swap used:"));
+                        inner_ui.label(RichText::new(format!("{:.2} GB", ProcessManagerApp::bytes_to_gigabytes(mutex_data.swap_usage))).color(Color32::LIGHT_BLUE));
+                        inner_ui.label("/");
+                        inner_ui.label(format!("{:.2} GB", ProcessManagerApp::bytes_to_gigabytes(self.memory_informations.total_swap)));
+                    });
+                });
             });
+
+            // Grid::new("grid1").striped(true)
+            // .num_columns(6)
+            // .show(ui, |ui| {
+            //     ui.label("Kolumna 1");
+            //     ui.label("Kolumna 2");
+            //     ui.label("Kolumna 3");
+            //     ui.label("Kolumna 4");
+            //     ui.label("Kolumna 5");
+            //     ui.label("Kolumna 6");
+            // });
         });
         ctx.request_repaint();
     }
@@ -543,6 +574,11 @@ impl<T> Data<T> {
     }
 }
 
+struct MemoryInformations {
+    total_memory: u64,
+    total_swap: u64,
+}
+
 struct SystemInformations {
     host_name: Option<String>,
     system_version_full_name: String,
@@ -563,8 +599,8 @@ struct CpuData{
 }
 
 impl CpuData {
-    fn new(cpus: &[Cpu], start_index: usize) -> Vec<Self> {
-        let mut i = start_index;
+    fn new(cpus: &[Cpu], initial_auto_color_index: usize) -> Vec<Self> {
+        let mut i = initial_auto_color_index;
         let data = cpus.iter().map(|x|{
             let cpu = Self { name: x.name().to_string(), usage: x.cpu_usage(), is_display_on_plot: false, plot_points: None, color: Self::auto_color(i)};
             i += 2;
