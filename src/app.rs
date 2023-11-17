@@ -57,8 +57,13 @@ impl ProcessManagerApp {
             system_version_full_name,
         };
         let disks_informations = sys.disks().iter().map(|x|{
+            let name = if format!("{:?}", x.name()).replace("\"", "") != "" {
+                format!("{:?}", x.name()).replace("\"", "")
+            } else {
+                String::from("None")
+            };
             DiskInformations{
-                name: format!("{:?}", x.name()).replace("\"", ""),
+                name: name,
                 available_space: x.available_space(),
                 file_system: match std::str::from_utf8(x.file_system()) {
                     Ok(value) => {
@@ -556,13 +561,13 @@ impl eframe::App for ProcessManagerApp {
 
                     inner_ui.horizontal(|inner_ui|{
                         inner_ui.vertical(|inner_ui|{
-                            inner_ui.label(format!("{}", disk.name));
+                            inner_ui.label(RichText::new(format!("{}", disk.name)).size(14.0).underline());
                             inner_ui.label(format!("{}", disk.kind));
                             inner_ui.label(format!("{}", disk.available_space));
                             inner_ui.label(format!("{}", disk.is_removable));
                             inner_ui.label(format!("{}", disk.file_system));
                             inner_ui.label(format!("{}", disk.mount_point));
-                            inner_ui.label(format!("{}", disk.total_space));        
+                            inner_ui.label(format!("{}", disk.total_space));
                         });
                         Plot::new(i)
                             .show_axes([false, true])
@@ -587,7 +592,7 @@ impl eframe::App for ProcessManagerApp {
             //     ui.label("Kolumna 6");
             // });
         });
-        ctx.request_repaint_after(Duration::from_millis(1));
+        ctx.request_repaint_after(Duration::from_millis(33));
         //ctx.request_repaint();
     }
 }
