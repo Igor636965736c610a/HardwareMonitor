@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use egui::epaint::Hsva;
 use egui::{SidePanel, RichText, Color32, Layout, Align, plot};
 use egui::plot::{Line, Legend, PlotBounds, Plot, Corner, PlotPoints};
-use sysinfo::{NetworkExt, NetworksExt,  System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind};
+use sysinfo::{NetworkExt, NetworksExt,  System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind, DiskKind};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
@@ -62,8 +62,13 @@ impl ProcessManagerApp {
             } else {
                 String::from("None")
             };
+            let kind = match x.kind() {
+                DiskKind::SSD => String::from("SSD"),
+                DiskKind::HDD => String::from("HDD"),
+                DiskKind::Unknown(_) => String::from("-")
+            };
             DiskInformations{
-                name: name,
+                name,
                 available_space: x.available_space(),
                 file_system: match std::str::from_utf8(x.file_system()) {
                     Ok(value) => {
@@ -76,7 +81,7 @@ impl ProcessManagerApp {
                 is_removable: if x.is_removable() { String::from("yes") } else { String::from("no") },
                 mount_point: format!("{:?}", x.mount_point()).replace("\"", ""),
                 total_space: x.total_space(),
-                kind: format!("{:?}", x.kind())
+                kind: format!("{}", kind)
             }
         }).collect();
         let memory_informations = MemoryInformations{
@@ -593,7 +598,6 @@ impl eframe::App for ProcessManagerApp {
             // });
         });
         ctx.request_repaint_after(Duration::from_millis(33));
-        //ctx.request_repaint();
     }
 }
 
