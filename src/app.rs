@@ -65,7 +65,7 @@ impl ProcessManagerApp {
             let kind = match x.kind() {
                 DiskKind::SSD => String::from("SSD"),
                 DiskKind::HDD => String::from("HDD"),
-                DiskKind::Unknown(_) => String::from("-")
+                DiskKind::Unknown(_) => String::from("UNKNOWN")
             };
             let available_space_tuple = ProcessManagerApp::bytes_to_gb_or_tb_tuple(x.available_space());
             let total_space_tuple = ProcessManagerApp::bytes_to_gb_or_tb_tuple(x.total_space());
