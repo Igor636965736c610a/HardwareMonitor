@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use egui::epaint::Hsva;
-use egui::{SidePanel, RichText, Color32, Layout, Align, plot};
+use egui::{SidePanel, RichText, Color32, Layout, Align, plot, Style};
 use egui::plot::{Line, Legend, PlotBounds, Plot, Corner, PlotPoints};
 use sysinfo::{NetworkExt, NetworksExt,  System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind, DiskKind};
 use std::sync::Arc;
@@ -67,21 +67,43 @@ impl ProcessManagerApp {
                 DiskKind::HDD => String::from("HDD"),
                 DiskKind::Unknown(_) => String::from("-")
             };
-            DiskInformations{
+            let available_space_tuple = ProcessManagerApp::bytes_to_gb_or_tb_tuple(x.available_space());
+            let total_space_tuple = ProcessManagerApp::bytes_to_gb_or_tb_tuple(x.total_space());
+            let file_system = match std::str::from_utf8(x.file_system()) {
+                Ok(value) => {
+                    value.to_string()
+                }
+                Err(_) => {
+                    panic!("nie panikuj!")
+                }
+            };
+            let is_removable = if x.is_removable() { String::from("yes") } else { String::from("no") };
+            let disk_fields = vec![
                 name,
-                available_space: x.available_space(),
-                file_system: match std::str::from_utf8(x.file_system()) {
-                    Ok(value) => {
-                        value.to_string()
-                    }
-                    Err(_) => {
-                        panic!("nie panikuj!")
-                    }
-                },
-                is_removable: if x.is_removable() { String::from("yes") } else { String::from("no") },
-                mount_point: format!("{:?}", x.mount_point()).replace("\"", ""),
-                total_space: x.total_space(),
-                kind: format!("{}", kind)
+                format!("{:?}", x.mount_point()).replace("\"", ""),
+                format!("{:.2} {}", available_space_tuple.0, available_space_tuple.1),
+                format!("{:.2} {}", total_space_tuple.0, total_space_tuple.1),
+                format!("{}", kind),
+                file_system,
+                is_removable,
+            ];
+            let longest_length = disk_fields.iter().map(|s| s.len()).max().unwrap_or(0);
+            let adjusted_disk_fields: Vec<String> = disk_fields
+                .iter()
+                .map(|s| {
+                    let padding = " ".repeat(longest_length.saturating_sub(s.len()));
+                    format!("{}{}", s, padding)
+                })
+                .collect();
+
+            DiskInformations{
+                name: adjusted_disk_fields[0].to_string(),
+                mount_point: adjusted_disk_fields[1].to_string(),
+                available_space: adjusted_disk_fields[2].to_string(),
+                total_space: adjusted_disk_fields[3].to_string(),
+                kind: adjusted_disk_fields[4].to_string(),
+                file_system: adjusted_disk_fields[5].to_string(),
+                is_removable: adjusted_disk_fields[6].to_string(),
             }
         }).collect();
         let memory_informations = MemoryInformations{
@@ -140,7 +162,7 @@ impl ProcessManagerApp {
         thread::spawn(move || {
             loop {
                 {
-                    let process_manager_mutex_data = &mut *arc_process_manager_mutex_data.lock().unwrap();
+                    let process_manager_mutex_data = &mut arc_process_manager_mutex_data.lock().unwrap();
 
                     sys.refresh_specifics(RefreshKind::everything()
                         .without_components()
@@ -320,8 +342,21 @@ impl ProcessManagerApp {
         println!("test")
     }
 
-    pub fn bytes_to_gigabytes(bytes: u64) -> f64 {
-        bytes as f64 / 1_073_741_824.0
+    fn bytes_to_gb_or_tb_tuple(bytes: u64) -> (f64, String) {
+        const GB: u64 = 1_073_741_824; // 1 GB = 2^30 bytes
+        const TB: u64 = 1_099_511_627_776; // 1 TB = 2^40 bytes
+    
+        if bytes >= TB {
+            (
+                bytes as f64 / TB as f64,
+                String::from("TB"),
+            )
+        } else {
+            (
+                bytes as f64 / GB as f64,
+                String::from("GB"),
+            )
+        }
     }
 }
 
@@ -519,17 +554,21 @@ impl eframe::App for ProcessManagerApp {
             ui.vertical(|inner_ui|{
                 inner_ui.horizontal(|inner_ui|{
                     let memory_group = inner_ui.group(|inner_ui|{
+                        let mem_usage = ProcessManagerApp::bytes_to_gb_or_tb_tuple(mutex_data.memory_usage);
+                        let mem_total = ProcessManagerApp::bytes_to_gb_or_tb_tuple(self.memory_informations.total_memory);
                         inner_ui.label(RichText::new("Memory used:"));
-                        inner_ui.label(RichText::new(format!("{:.2} GB", ProcessManagerApp::bytes_to_gigabytes(mutex_data.memory_usage))).color(Color32::RED));
+                        inner_ui.label(RichText::new(format!("{:.2} {}", mem_usage.0, mem_usage.1)).color(Color32::RED));
                         inner_ui.label("/");
-                        inner_ui.label(format!("{:.2} GB", ProcessManagerApp::bytes_to_gigabytes(self.memory_informations.total_memory)));
+                        inner_ui.label(format!("{:.2} {}", mem_total.0, mem_total.1));
                     });
                     
                     let swap_group = inner_ui.group(|inner_ui|{
+                        let swap_usage = ProcessManagerApp::bytes_to_gb_or_tb_tuple(mutex_data.swap_usage);
+                        let total_swap = ProcessManagerApp::bytes_to_gb_or_tb_tuple(self.memory_informations.total_swap);
                         inner_ui.label(RichText::new("Swap used:"));
-                        inner_ui.label(RichText::new(format!("{:.2} GB", ProcessManagerApp::bytes_to_gigabytes(mutex_data.swap_usage))).color(Color32::LIGHT_BLUE));
+                        inner_ui.label(RichText::new(format!("{:.2} {}", swap_usage.0, swap_usage.1)).color(Color32::LIGHT_BLUE));
                         inner_ui.label("/");
-                        inner_ui.label(format!("{:.2} GB", ProcessManagerApp::bytes_to_gigabytes(self.memory_informations.total_swap)));
+                        inner_ui.label(format!("{:.2} {}", total_swap.0, total_swap.1));
                     });
                     memory_section_width = memory_group.response.rect.width() + swap_group.response.rect.width();
                 })
@@ -557,22 +596,38 @@ impl eframe::App for ProcessManagerApp {
             });
 
             ui.separator();
+            
+            let background_color = Color32::from_rgb(10, 13, 13); 
+            let mut disk_section_width = 0.0;
 
-            ui.label(RichText::new("Disks:").heading());
+            ui.horizontal(|inner_ui|{
+                let label = inner_ui.label(RichText::new("Disks:").heading());
+                let group = inner_ui.group(|inner_ui|{
+                    inner_ui.colored_label(Color32::GOLD, "Name");
+                    inner_ui.colored_label(Color32::BROWN, "Mount");
+                    inner_ui.colored_label(Color32::LIGHT_BLUE, "Available space");
+                    inner_ui.colored_label(Color32::LIGHT_GRAY, "Total space");
+                    inner_ui.colored_label(Color32::LIGHT_RED, "Kind");
+                    inner_ui.colored_label(Color32::LIGHT_GREEN, "Fs");
+                    inner_ui.colored_label(Color32::KHAKI, "Removale");
+                });
+                disk_section_width = label.rect.width() + group.response.rect.width() - 5.0;
+            });
 
             mutex_data.disks_informations.iter().enumerate().for_each(|(i, disk)|{
                 ui.group(|inner_ui|{
-                    inner_ui.set_width(memory_section_width);
+                    inner_ui.set_width(disk_section_width);
 
                     inner_ui.horizontal(|inner_ui|{
                         inner_ui.vertical(|inner_ui|{
-                            inner_ui.label(RichText::new(format!("{}", disk.name)).size(14.0).underline());
-                            inner_ui.label(format!("{}", disk.kind));
-                            inner_ui.label(format!("{}", disk.available_space));
-                            inner_ui.label(format!("{}", disk.is_removable));
-                            inner_ui.label(format!("{}", disk.file_system));
-                            inner_ui.label(format!("{}", disk.mount_point));
-                            inner_ui.label(format!("{}", disk.total_space));
+                            inner_ui.label(RichText::new(format!("{}", disk.name)).size(12.0).underline().color(Color32::GOLD).background_color(background_color).monospace());
+                            inner_ui.add_space(1.7);
+                            inner_ui.label(RichText::new(format!("{}", disk.mount_point)).size(12.0).color(Color32::BROWN).background_color(background_color).monospace());
+                            inner_ui.label(RichText::new(format!("{}", disk.available_space)).size(12.0).color(Color32::LIGHT_BLUE).background_color(background_color).monospace());
+                            inner_ui.label(RichText::new(format!("{}", disk.total_space)).size(12.0).color(Color32::LIGHT_GRAY).background_color(background_color).monospace());
+                            inner_ui.label(RichText::new(format!("{}", disk.kind)).size(12.0).color(Color32::LIGHT_RED).background_color(background_color).monospace());
+                            inner_ui.label(RichText::new(format!("{}", disk.file_system)).size(12.0).color(Color32::LIGHT_GREEN).background_color(background_color).monospace());
+                            inner_ui.label(RichText::new(format!("{}", disk.is_removable)).size(12.0).color(Color32::KHAKI).background_color(background_color).monospace());
                         });
                         Plot::new(i)
                             .show_axes([false, true])
@@ -671,12 +726,12 @@ impl CpuData {
 
 struct DiskInformations{
     name: String,
-    available_space: u64,
+    mount_point: String,
+    available_space: String,
+    total_space: String,
+    kind: String,
     file_system: String,
     is_removable: String,
-    mount_point: String,
-    total_space: u64,
-    kind: String,
 }
 
 struct NetworkInformations {
