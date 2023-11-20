@@ -77,7 +77,6 @@ impl ProcessManagerApp {
             system_version_full_name,
         };
         let disks_informations = sys.disks().iter().map(|x|{
-            println!("{:?}", x.mount_point());
             let name = if format!("{:?}", x.name()).replace("\"", "") != "" {
                 format!("{:?}", x.name()).replace("\"", "")
             } else {
@@ -471,6 +470,7 @@ fn get_disk_performance(disk_name: &str) -> Option<DISK_PERFORMANCE> {
         let mut disk_info: DISK_PERFORMANCE = std::mem::zeroed();
         let mut bytes: DWORD = 0;
 
+        //https://learn.microsoft.com/en-us/windows/win32/fileio/disk-management-control-codes
         if DeviceIoControl(
             dev,
             IOCTL_DISK_PERFORMANCE,
