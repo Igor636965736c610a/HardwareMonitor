@@ -88,7 +88,7 @@ impl ProcessManagerApp {
                 DiskKind::HDD => String::from("HDD"),
                 DiskKind::Unknown(_) => String::from("UNKNOWN")
             };
-            let available_space_tuple = ProcessManagerApp::bytes_to_gb_or_tb_tuple(x.available_space());
+            let useed_space_tuple = ProcessManagerApp::bytes_to_gb_or_tb_tuple(x.total_space() - x.available_space());
             let total_space_tuple = ProcessManagerApp::bytes_to_gb_or_tb_tuple(x.total_space());
             let file_system = match std::str::from_utf8(x.file_system()) {
                 Ok(value) => {
@@ -102,7 +102,7 @@ impl ProcessManagerApp {
             let disk_fields = vec![
                 name,
                 format!("{:?}", x.mount_point()).replace("\"", ""),
-                format!("{:.2} {}", available_space_tuple.0, available_space_tuple.1),
+                format!("{:.2} {}", useed_space_tuple.0, useed_space_tuple.1),
                 format!("{:.2} {}", total_space_tuple.0, total_space_tuple.1),
                 format!("{}", kind),
                 file_system,
@@ -119,7 +119,7 @@ impl ProcessManagerApp {
             DiskInformations{
                 name: adjusted_disk_fields[0].to_string(),
                 mount_point: adjusted_disk_fields[1].to_string(),
-                available_space: adjusted_disk_fields[2].to_string(),
+                used_space: adjusted_disk_fields[2].to_string(),
                 total_space: adjusted_disk_fields[3].to_string(),
                 kind: adjusted_disk_fields[4].to_string(),
                 file_system: adjusted_disk_fields[5].to_string(),
@@ -740,11 +740,11 @@ impl eframe::App for ProcessManagerApp {
                 let group = inner_ui.group(|inner_ui|{
                     inner_ui.colored_label(Color32::GOLD, "Name");
                     inner_ui.colored_label(Color32::BROWN, "Mount");
-                    inner_ui.colored_label(Color32::LIGHT_BLUE, "Available space");
+                    inner_ui.colored_label(Color32::LIGHT_BLUE, "Used space");
                     inner_ui.colored_label(Color32::LIGHT_GRAY, "Total space");
                     inner_ui.colored_label(Color32::LIGHT_RED, "Kind");
                     inner_ui.colored_label(Color32::LIGHT_GREEN, "Fs");
-                    inner_ui.colored_label(Color32::KHAKI, "Portable");
+                    inner_ui.colored_label(Color32::KHAKI, "Removable");
                 });
                 disk_section_width = label.rect.width() + group.response.rect.width() - 5.0;
             });
@@ -759,7 +759,7 @@ impl eframe::App for ProcessManagerApp {
                                 inner_ui.label(RichText::new(format!("{}", disk.name)).size(12.0).underline().color(Color32::GOLD).background_color(background_color).monospace());
                                 inner_ui.add_space(1.7);
                                 inner_ui.label(RichText::new(format!("{}", disk.mount_point)).size(12.0).color(Color32::BROWN).background_color(background_color).monospace());
-                                inner_ui.label(RichText::new(format!("{}", disk.available_space)).size(12.0).color(Color32::LIGHT_BLUE).background_color(background_color).monospace());
+                                inner_ui.label(RichText::new(format!("{}", disk.used_space)).size(12.0).color(Color32::LIGHT_BLUE).background_color(background_color).monospace());
                                 inner_ui.label(RichText::new(format!("{}", disk.total_space)).size(12.0).color(Color32::LIGHT_GRAY).background_color(background_color).monospace());
                                 inner_ui.label(RichText::new(format!("{}", disk.kind)).size(12.0).color(Color32::LIGHT_RED).background_color(background_color).monospace());
                                 inner_ui.label(RichText::new(format!("{}", disk.file_system)).size(12.0).color(Color32::LIGHT_GREEN).background_color(background_color).monospace());
@@ -864,7 +864,7 @@ impl CpuData {
 struct DiskInformations{
     name: String,
     mount_point: String,
-    available_space: String,
+    used_space: String,
     total_space: String,
     kind: String,
     file_system: String,
