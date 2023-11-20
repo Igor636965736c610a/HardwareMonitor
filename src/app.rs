@@ -1,12 +1,32 @@
 use std::collections::VecDeque;
+use std::time::Instant;
 use egui::epaint::Hsva;
-use egui::{SidePanel, RichText, Color32, Layout, Align, plot, Style};
+use egui::scroll_area::ScrollBarVisibility;
+use egui::{SidePanel, RichText, Color32, Layout, Align, plot, ScrollArea};
 use egui::plot::{Line, Legend, PlotBounds, Plot, Corner, PlotPoints};
-use sysinfo::{NetworkExt, NetworksExt,  System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind, DiskKind};
+use serde::de;
+use serde_json::Value;
+use sysinfo::{NetworkExt, NetworksExt, System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind, DiskKind};
+use winapi::ctypes::c_void;
+use winapi::um::ioapiset::DeviceIoControl;
+use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 use core::time::Duration;
+use std::process::Command;
+use std::str;
+extern crate winapi;
+
+
+use std::ffi::CString;
+use std::ptr;
+use winapi::um::handleapi::CloseHandle;
+use winapi::um::fileapi::{CreateFileA, OPEN_EXISTING};
+use winapi::um::winioctl::{IOCTL_DISK_PERFORMANCE, DISK_PERFORMANCE};
+use winapi::shared::minwindef::{DWORD, FALSE, TRUE};
+use winapi::shared::ntdef::HANDLE;
+
 
 //#[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct ProcessManagerApp {
@@ -57,6 +77,7 @@ impl ProcessManagerApp {
             system_version_full_name,
         };
         let disks_informations = sys.disks().iter().map(|x|{
+            println!("{:?}", x.mount_point());
             let name = if format!("{:?}", x.name()).replace("\"", "") != "" {
                 format!("{:?}", x.name()).replace("\"", "")
             } else {
@@ -93,8 +114,7 @@ impl ProcessManagerApp {
                 .map(|s| {
                     let padding = " ".repeat(longest_length.saturating_sub(s.len()));
                     format!("{}{}", s, padding)
-                })
-                .collect();
+                }).collect();
 
             DiskInformations{
                 name: adjusted_disk_fields[0].to_string(),
@@ -159,10 +179,83 @@ impl ProcessManagerApp {
     {
         let arc_process_manager_mutex_data = Arc::clone(&self.process_manager_mutex_data);
 
+        let mut last_performance: Option<DISK_PERFORMANCE> = None;
+        let mut last_measurement_time = Instant::now();
+
         thread::spawn(move || {
             loop {
                 {
+                    // FROM C++ https://stackoverflow.com/a/30451751 MY CREATIVE INVERTION AND TRIAL AND ERROR METHOD XDD (It works) and winapi docs and frineds help
                     let process_manager_mutex_data = &mut arc_process_manager_mutex_data.lock().unwrap();
+
+                    let test = process_manager_mutex_data.disks_informations.first().unwrap();
+                    
+                    let test2 = test.mount_point.replace("\\", "");
+
+                    println!("{}", test2);
+
+                    if let Some(current_performance) = get_disk_performance(&test2) {
+                        if let Some(last) = last_performance {
+                            unsafe {
+                                let read_diff = current_performance.BytesRead.QuadPart() - last.BytesRead.QuadPart();
+                                let write_diff = current_performance.BytesWritten.QuadPart() - last.BytesWritten.QuadPart();
+                                
+                                let total_diff = read_diff + write_diff;
+                                
+                                let elapsed_time = last_measurement_time.elapsed().as_secs_f64();
+                                
+                                // transfer spped/rate (KB/s) (ChatGpt solution to count it)
+                                let transfer_rate_kb_per_sec = (total_diff as f64 / 1024.0) / elapsed_time;
+                                println!("Transfer Rate: {:.2} KB/s", transfer_rate_kb_per_sec);
+                            }
+                        }
+                        last_performance = Some(current_performance);
+            
+                        // Time measurement
+                        last_measurement_time = Instant::now();
+                    }
+                    
+                    // unsafe {
+                    //     let dev = CreateFileA(
+                    //         CString::new(format!("\\\\.\\{}", test2)).unwrap().as_ptr(),
+                    //         winapi::um::winnt::FILE_READ_ATTRIBUTES,
+                    //         FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    //         ptr::null_mut(),
+                    //         OPEN_EXISTING,
+                    //         0,
+                    //         ptr::null_mut(),
+                    //     );
+                
+                    //     if HANDLE::is_null(dev) {
+                    //         eprintln!("Error while opening disk");
+                    //         return;
+                    //     }
+                
+                    //     let mut disk_info: DISK_PERFORMANCE = std::mem::zeroed();
+                    //     let mut bytes: DWORD = 0;
+                
+                    //     if DeviceIoControl(
+                    //         dev,
+                    //         IOCTL_DISK_PERFORMANCE,
+                    //         ptr::null_mut(),
+                    //         0,
+                    //         &mut disk_info as *mut _ as *mut winapi::ctypes::c_void,
+                    //         std::mem::size_of::<DISK_PERFORMANCE>() as DWORD,
+                    //         &mut bytes,
+                    //         ptr::null_mut(),
+                    //     ) == FALSE
+                    //     {
+                    //         eprintln!("Error in DeviceIoControl");
+                    //         CloseHandle(dev);
+                    //         return;
+                    //     }
+                
+                    //     println!("Read Bytes: {}", disk_info.BytesRead.QuadPart());
+                    //     println!("Write Bytes: {}", disk_info.BytesWritten.QuadPart());
+                
+                    //     CloseHandle(dev);
+                    // };
+                    
 
                     sys.refresh_specifics(RefreshKind::everything()
                         .without_components()
@@ -184,9 +277,7 @@ impl ProcessManagerApp {
                     // println!("{} {:?} {:?}", sys.distribution_id(), sys.long_os_version(), sys.name());
                     
 
-                    // for (pid, process) in process_manager_mutex_data.system.processes() {
-                    //     println!("[{}] {} {:?}", pid, process.name(), process.disk_usage());
-                    // }
+                    
 
                     // println!("{}",process_manager_mutex_data.system.global_cpu_info().frequency());
 
@@ -312,8 +403,9 @@ impl ProcessManagerApp {
                             None => {
                                 panic!("nie panikuj!");
                             }
-                        }    
+                        }
                     });
+
 
                     let mut net_y_bound: u64 = 100;
     
@@ -339,7 +431,6 @@ impl ProcessManagerApp {
                 thread::sleep(Duration::from_secs(1));
             }
         });
-        println!("test")
     }
 
     fn bytes_to_gb_or_tb_tuple(bytes: u64) -> (f64, String) {
@@ -357,6 +448,48 @@ impl ProcessManagerApp {
                 String::from("GB"),
             )
         }
+    }
+}
+
+fn get_disk_performance(disk_name: &str) -> Option<DISK_PERFORMANCE> {
+    unsafe {
+        let dev = CreateFileA(
+            CString::new(format!("\\\\.\\{}", disk_name)).unwrap().as_ptr(),
+            winapi::um::winnt::FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            ptr::null_mut(),
+            OPEN_EXISTING,
+            0,
+            ptr::null_mut(),
+        );
+
+        if HANDLE::is_null(dev) {
+            eprintln!("Error while opening disk");
+            return None;
+        }
+
+        let mut disk_info: DISK_PERFORMANCE = std::mem::zeroed();
+        let mut bytes: DWORD = 0;
+
+        if DeviceIoControl(
+            dev,
+            IOCTL_DISK_PERFORMANCE,
+            ptr::null_mut(),
+            0,
+            &mut disk_info as *mut _ as *mut winapi::ctypes::c_void,
+            std::mem::size_of::<DISK_PERFORMANCE>() as DWORD,
+            &mut bytes,
+            ptr::null_mut(),
+        ) == FALSE
+        {
+            eprintln!("Error in DeviceIoControl");
+            CloseHandle(dev);
+            return None;
+        }
+
+        CloseHandle(dev);
+
+        Some(disk_info)
     }
 }
 
@@ -508,21 +641,23 @@ impl eframe::App for ProcessManagerApp {
                 })
             });
 
-            ui.vertical_centered(|inner_ui| {
-                mutex_data.network_informations.iter_mut().for_each(|net|{
-                    inner_ui.horizontal(|inner_ui| {
-                        inner_ui.checkbox(&mut net.is_display_on_plot, "");
-                        inner_ui.vertical(|inner_ui| {
-                            let mut t1 = RichText::new(format!("{}. {}", net.number, net.interface_name));
-                            let mut t2 = RichText::new(format!("Mac address: {}", net.mac_address));
-                            if !net.is_display_on_plot {
-                                t1 = t1.weak();
-                                t2 = t2.weak();
-                            }
-                            inner_ui.label(t1);
-                            inner_ui.label(t2);
-                            inner_ui.separator();
-                        })
+            ScrollArea::vertical().scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden).show(ui, |inner_ui|{
+                inner_ui.vertical_centered(|inner_ui| {
+                    mutex_data.network_informations.iter_mut().for_each(|net|{
+                        inner_ui.horizontal(|inner_ui| {
+                            inner_ui.checkbox(&mut net.is_display_on_plot, "");
+                            inner_ui.vertical(|inner_ui| {
+                                let mut t1 = RichText::new(format!("{}. {}", net.number, net.interface_name));
+                                let mut t2 = RichText::new(format!("Mac address: {}", net.mac_address));
+                                if !net.is_display_on_plot {
+                                    t1 = t1.weak();
+                                    t2 = t2.weak();
+                                }
+                                inner_ui.label(t1);
+                                inner_ui.label(t2);
+                                inner_ui.separator();
+                            })
+                        });
                     });
                 });
             });
@@ -531,15 +666,15 @@ impl eframe::App for ProcessManagerApp {
         SidePanel::left("MEMORY").show(ctx, |ui|{
             let plot = Plot::new("memory_plot")
                 .show_axes([false, true])
-                .height(0.32 * window_size.y)
-                .width(0.32 * window_size.x)
+                .height(0.325 * window_size.y)
+                .width(0.325 * window_size.x)
                 .allow_scroll(false)
                 .allow_drag(false)
                 .legend(Legend::default().position(Corner::LeftTop).background_alpha(0.0))
                 .reset();
     
-            ui.set_max_width(0.32 * window_size.x);
-            ui.set_max_height(0.32 * window_size.y);
+            ui.set_max_width(0.325 * window_size.x);
+            ui.set_max_height(0.325 * window_size.y);
 
             plot.show(ui, |plot_ui|{
                 plot_ui.line(Line::new(memory_points).name("memory %"));
@@ -609,35 +744,37 @@ impl eframe::App for ProcessManagerApp {
                     inner_ui.colored_label(Color32::LIGHT_GRAY, "Total space");
                     inner_ui.colored_label(Color32::LIGHT_RED, "Kind");
                     inner_ui.colored_label(Color32::LIGHT_GREEN, "Fs");
-                    inner_ui.colored_label(Color32::KHAKI, "Removale");
+                    inner_ui.colored_label(Color32::KHAKI, "Portable");
                 });
                 disk_section_width = label.rect.width() + group.response.rect.width() - 5.0;
             });
 
-            mutex_data.disks_informations.iter().enumerate().for_each(|(i, disk)|{
-                ui.group(|inner_ui|{
-                    inner_ui.set_width(disk_section_width);
-
-                    inner_ui.horizontal(|inner_ui|{
-                        inner_ui.vertical(|inner_ui|{
-                            inner_ui.label(RichText::new(format!("{}", disk.name)).size(12.0).underline().color(Color32::GOLD).background_color(background_color).monospace());
-                            inner_ui.add_space(1.7);
-                            inner_ui.label(RichText::new(format!("{}", disk.mount_point)).size(12.0).color(Color32::BROWN).background_color(background_color).monospace());
-                            inner_ui.label(RichText::new(format!("{}", disk.available_space)).size(12.0).color(Color32::LIGHT_BLUE).background_color(background_color).monospace());
-                            inner_ui.label(RichText::new(format!("{}", disk.total_space)).size(12.0).color(Color32::LIGHT_GRAY).background_color(background_color).monospace());
-                            inner_ui.label(RichText::new(format!("{}", disk.kind)).size(12.0).color(Color32::LIGHT_RED).background_color(background_color).monospace());
-                            inner_ui.label(RichText::new(format!("{}", disk.file_system)).size(12.0).color(Color32::LIGHT_GREEN).background_color(background_color).monospace());
-                            inner_ui.label(RichText::new(format!("{}", disk.is_removable)).size(12.0).color(Color32::KHAKI).background_color(background_color).monospace());
-                        });
-                        Plot::new(i)
-                            .show_axes([false, true])
-                            .allow_scroll(false)
-                            .allow_drag(false)
-                            .show(inner_ui, |plot_ui|{
-                                plot_ui.line(Line::new(PlotPoints::default()));
-                                plot_ui.set_plot_bounds(plot_bounds);
-                                
+            ScrollArea::vertical().scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden).show(ui, |inner_ui|{
+                mutex_data.disks_informations.iter().enumerate().for_each(|(i, disk)|{
+                    inner_ui.group(|inner_ui|{
+                        inner_ui.set_width(disk_section_width);
+                    
+                        inner_ui.horizontal(|inner_ui|{
+                            inner_ui.vertical(|inner_ui|{
+                                inner_ui.label(RichText::new(format!("{}", disk.name)).size(12.0).underline().color(Color32::GOLD).background_color(background_color).monospace());
+                                inner_ui.add_space(1.7);
+                                inner_ui.label(RichText::new(format!("{}", disk.mount_point)).size(12.0).color(Color32::BROWN).background_color(background_color).monospace());
+                                inner_ui.label(RichText::new(format!("{}", disk.available_space)).size(12.0).color(Color32::LIGHT_BLUE).background_color(background_color).monospace());
+                                inner_ui.label(RichText::new(format!("{}", disk.total_space)).size(12.0).color(Color32::LIGHT_GRAY).background_color(background_color).monospace());
+                                inner_ui.label(RichText::new(format!("{}", disk.kind)).size(12.0).color(Color32::LIGHT_RED).background_color(background_color).monospace());
+                                inner_ui.label(RichText::new(format!("{}", disk.file_system)).size(12.0).color(Color32::LIGHT_GREEN).background_color(background_color).monospace());
+                                inner_ui.label(RichText::new(format!("{}", disk.is_removable)).size(12.0).color(Color32::KHAKI).background_color(background_color).monospace());
                             });
+                            Plot::new(i)
+                                .show_axes([false, true])
+                                .allow_scroll(false)
+                                .allow_drag(false)
+                                .show(inner_ui, |plot_ui|{
+                                    plot_ui.line(Line::new(PlotPoints::default()));
+                                    plot_ui.set_plot_bounds(plot_bounds);
+                                    
+                                });
+                        });
                     });
                 });
             });

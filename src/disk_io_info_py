@@ -1,0 +1,17 @@
+import psutil
+
+def get_disk_io_counters():
+    dic = {}
+    x = 1
+    disk_io_counters = psutil.disk_io_counters(perdisk=True)
+    
+    for disk_name, disk_counters in disk_io_counters.items():
+        disk_total = disk_counters.read_bytes + disk_counters.write_bytes
+        dic[x] = disk_total
+        x += 1
+
+    return dic
+
+if __name__ == "__main__":
+    disk_io_results = get_disk_io_counters()
+    print(disk_io_results)

@@ -18,7 +18,9 @@ eframe = { version = "0.22.0", default-features = false, features = [
 log = "0.4"
 sysinfo = "0.29.10"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
 image = "0.24.7"
+winapi = { version = "0.3", features = ["winioctl", "winnt", "fileapi"] }
 
 # You only need serde if you want app persistence:
 
