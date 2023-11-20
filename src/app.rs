@@ -1,25 +1,20 @@
 use std::collections::VecDeque;
+use std::ffi::CString;
 use std::time::Instant;
 use egui::epaint::Hsva;
 use egui::scroll_area::ScrollBarVisibility;
 use egui::{SidePanel, RichText, Color32, Layout, Align, plot, ScrollArea};
 use egui::plot::{Line, Legend, PlotBounds, Plot, Corner, PlotPoints};
-use serde::de;
-use serde_json::Value;
 use sysinfo::{NetworkExt, NetworksExt, System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind, DiskKind};
-use winapi::ctypes::c_void;
 use winapi::um::ioapiset::DeviceIoControl;
 use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 use core::time::Duration;
-use std::process::Command;
 use std::str;
-extern crate winapi;
 
 
-use std::ffi::CString;
 use std::ptr;
 use winapi::um::handleapi::CloseHandle;
 use winapi::um::fileapi::{CreateFileA, OPEN_EXISTING};
@@ -471,6 +466,7 @@ fn get_disk_performance(disk_name: &str) -> Option<DISK_PERFORMANCE> {
         let mut bytes: DWORD = 0;
 
         //https://learn.microsoft.com/en-us/windows/win32/fileio/disk-management-control-codes
+        //https://microsoft.github.io/windows-docs-rs/doc/windows/Win32/System/Ioctl/struct.DISK_PERFORMANCE.html
         if DeviceIoControl(
             dev,
             IOCTL_DISK_PERFORMANCE,
