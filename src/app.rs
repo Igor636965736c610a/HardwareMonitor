@@ -4,7 +4,7 @@ use std::time::Instant;
 use egui::epaint::Hsva;
 use egui::scroll_area::ScrollBarVisibility;
 use egui::{SidePanel, RichText, Color32, Layout, Align, plot, ScrollArea};
-use egui::plot::{Line, Legend, PlotBounds, Plot, Corner, PlotPoints};
+use egui::plot::{Line, Legend, PlotBounds, Plot, Corner};
 use sysinfo::{NetworkExt, NetworksExt, System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind, DiskKind};
 use winapi::um::ioapiset::DeviceIoControl;
 use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE};
@@ -13,13 +13,11 @@ use std::sync::Mutex;
 use std::thread;
 use core::time::Duration;
 use std::str;
-
-
 use std::ptr;
 use winapi::um::handleapi::CloseHandle;
 use winapi::um::fileapi::{CreateFileA, OPEN_EXISTING};
 use winapi::um::winioctl::{IOCTL_DISK_PERFORMANCE, DISK_PERFORMANCE};
-use winapi::shared::minwindef::{DWORD, FALSE, TRUE};
+use winapi::shared::minwindef::{DWORD, FALSE};
 use winapi::shared::ntdef::HANDLE;
 
 
@@ -118,6 +116,9 @@ impl ProcessManagerApp {
                 kind: adjusted_disk_fields[4].to_string(),
                 file_system: adjusted_disk_fields[5].to_string(),
                 is_removable: adjusted_disk_fields[6].to_string(),
+                last_performance: None,
+                plot_points: Data::new(20),
+                y_max_bound: 450.0,
             }
         }).collect();
         let memory_informations = MemoryInformations{
@@ -173,160 +174,21 @@ impl ProcessManagerApp {
     {
         let arc_process_manager_mutex_data = Arc::clone(&self.process_manager_mutex_data);
 
-        let mut last_performance: Option<DISK_PERFORMANCE> = None;
         let mut last_measurement_time = Instant::now();
 
         thread::spawn(move || {
             loop {
                 {
-                    // FROM C++ https://stackoverflow.com/a/30451751 MY CREATIVE INVERTION AND TRIAL AND ERROR METHOD XDD (It works) and winapi docs and frineds help
                     let process_manager_mutex_data = &mut arc_process_manager_mutex_data.lock().unwrap();
-
-                    let test = process_manager_mutex_data.disks_informations.first().unwrap();
-                    
-                    let test2 = test.mount_point.replace("\\", "");
-
-                    println!("{}", test2);
-
-                    if let Some(current_performance) = get_disk_performance(&test2) {
-                        if let Some(last) = last_performance {
-                            unsafe {
-                                let read_diff = current_performance.BytesRead.QuadPart() - last.BytesRead.QuadPart();
-                                let write_diff = current_performance.BytesWritten.QuadPart() - last.BytesWritten.QuadPart();
-                                
-                                let total_diff = read_diff + write_diff;
-                                
-                                let elapsed_time = last_measurement_time.elapsed().as_secs_f64();
-                                
-                                // transfer spped/rate (KB/s) (ChatGpt solution to count it)
-                                let transfer_rate_kb_per_sec = (total_diff as f64 / 1024.0) / elapsed_time;
-                                println!("Transfer Rate: {:.2} KB/s", transfer_rate_kb_per_sec);
-                            }
-                        }
-                        last_performance = Some(current_performance);
-            
-                        // Time measurement
-                        last_measurement_time = Instant::now();
-                    }
-                    
-                    // unsafe {
-                    //     let dev = CreateFileA(
-                    //         CString::new(format!("\\\\.\\{}", test2)).unwrap().as_ptr(),
-                    //         winapi::um::winnt::FILE_READ_ATTRIBUTES,
-                    //         FILE_SHARE_READ | FILE_SHARE_WRITE,
-                    //         ptr::null_mut(),
-                    //         OPEN_EXISTING,
-                    //         0,
-                    //         ptr::null_mut(),
-                    //     );
-                
-                    //     if HANDLE::is_null(dev) {
-                    //         eprintln!("Error while opening disk");
-                    //         return;
-                    //     }
-                
-                    //     let mut disk_info: DISK_PERFORMANCE = std::mem::zeroed();
-                    //     let mut bytes: DWORD = 0;
-                
-                    //     if DeviceIoControl(
-                    //         dev,
-                    //         IOCTL_DISK_PERFORMANCE,
-                    //         ptr::null_mut(),
-                    //         0,
-                    //         &mut disk_info as *mut _ as *mut winapi::ctypes::c_void,
-                    //         std::mem::size_of::<DISK_PERFORMANCE>() as DWORD,
-                    //         &mut bytes,
-                    //         ptr::null_mut(),
-                    //     ) == FALSE
-                    //     {
-                    //         eprintln!("Error in DeviceIoControl");
-                    //         CloseHandle(dev);
-                    //         return;
-                    //     }
-                
-                    //     println!("Read Bytes: {}", disk_info.BytesRead.QuadPart());
-                    //     println!("Write Bytes: {}", disk_info.BytesWritten.QuadPart());
-                
-                    //     CloseHandle(dev);
-                    // };
-                    
 
                     sys.refresh_specifics(RefreshKind::everything()
                         .without_components()
                         .without_components_list()
                         .without_users_list());
 
-                    // for component in process_manager_mutex_data.system.components() {
-                    //     println!("xx {:?}", component);
-                    // }
-
                     let processor = sys.global_cpu_info().cpu_usage();
                     let memory = (sys.used_memory() as f64 / sys.total_memory() as f64) * 100.0;
                     let swap =  (sys.used_swap() as f64 / sys.total_swap() as f64) * 100.0;
-
-                    // println!("xxx - {}", process_manager_mutex_data.system.load_average().one);
-
-                    // process_manager_mutex_data.system.refresh_all();
-
-                    // println!("{} {:?} {:?}", sys.distribution_id(), sys.long_os_version(), sys.name());
-                    
-
-                    
-
-                    // println!("{}",process_manager_mutex_data.system.global_cpu_info().frequency());
-
-                    // for component in process_manager_mutex_data.system.components() {
-                    //     println!("xx {:?}", component);
-                    // }
-
-                    // println!("=> disks:");
-                    // for disk in sys.disks() {
-                    //    println!("{:?}", disk);
-                    // }
-
-                    // for cpu in system.cpus() {
-                    //     println!("{} - {}% ",cpu.name(), cpu.cpu_usage());
-                    // }
-
-                    // for (interface_name, network) in system.networks() {
-                    //     println!("in: {} xxxxxxx {} ----------- {} ------------ {}", network.received(), network.transmitted(), network.mac_address(), interface_name);
-                    // }
-
-                    // for cpu in process_manager_mutex_data.system.cpus() {
-                    //     println!("{}%", cpu.cpu_usage());
-                    // }
-
-                    // println!("=> networks:");
-                    // for (interface_name, data) in process_manager_mutex_data.system.networks() {
-                    //     println!("{}: {}/{} B", data.mac_address(), data.received(), data.transmitted());
-                    // }
-
-                    // println!("=> disks:");
-                    // for disk in process_manager_mutex_data.system.disks() {
-                    //     println!("name {}", disk.name().to_string_lossy().to_string());
-                    //     println!("available_space {}", disk.available_space());
-                    //     let file_system = match std::str::from_utf8(disk.file_system()) {
-                    //         Ok(value) => {
-                    //             value
-                    //         }
-                    //         Err(_) => {
-                    //             panic!("nie panikuj!")
-                    //         }
-                    //     };
-                    //     println!("file_system {}", file_system);
-                    //     println!("is_removable {}", disk.is_removable());
-                    //     println!("mount_point {}", disk.mount_point().to_string_lossy().to_string());
-                    //     println!("total_space {}", disk.total_space());
-                    //     println!("kind {:?}", disk.kind());
-                    //     println!("");
-                    // }
-
-                    // println!("");
-                    // println!("ORIGINAL");
-                    // println!("=> disks:");
-                    // for disk in process_manager_mutex_data.system.disks() {
-                    //     println!("{:?}", disk);
-                    // }
 
                     sys.cpus().iter().for_each(|x|{
                         let cpu_data = process_manager_mutex_data.cpus_performance_data_points.iter_mut().find(|y| y.name == x.name());
@@ -353,6 +215,25 @@ impl ProcessManagerApp {
                                 panic!("nie panikuj!");
                             }
                         }
+                    });
+
+                    sys.disks().iter().for_each(|x|{
+                        let disk = process_manager_mutex_data.disks_informations.iter_mut().find(|disk| 
+                            disk.mount_point.trim() == format!("{:?}", x.mount_point()).replace("\"", "").trim().to_string()).unwrap();
+                        
+                        set_disk_transfer(disk, &mut last_measurement_time);
+                        let mut disk_y_max_bound = 450.0;
+                        let bound = disk.plot_points.data_iter().max_by(|a, b| a.partial_cmp(b).unwrap()); 
+                        match bound {
+                            Some(value) => {
+                                if *value > disk_y_max_bound{
+                                    disk_y_max_bound = *value
+                                }
+                            }
+                            None => {
+                            }
+                        }
+                        disk.y_max_bound = disk_y_max_bound;
                     });
 
                     process_manager_mutex_data.total_cpu_usage = processor.round() as u64;
@@ -445,6 +326,32 @@ impl ProcessManagerApp {
     }
 }
 
+fn set_disk_transfer(disk: &mut DiskInformations, last_measurement_time: &mut Instant) {
+    let disk_name = disk.mount_point.replace("\\", "");
+    if let Some(current_performance) = get_disk_performance(&disk_name) {
+        if let Some(last) = disk.last_performance {
+            unsafe {
+                let read_diff = current_performance.BytesRead.QuadPart() - last.BytesRead.QuadPart();
+                let write_diff = current_performance.BytesWritten.QuadPart() - last.BytesWritten.QuadPart();
+                
+                let total_diff = read_diff + write_diff;
+                
+                let elapsed_time = last_measurement_time.elapsed().as_secs_f64();
+                
+                // transfer spped/rate (KB/s)
+                let transfer_rate_kb_per_sec = (total_diff as f64 / 1024.0) / elapsed_time;
+                disk.plot_points.push(transfer_rate_kb_per_sec as f32);
+
+                println!("Transfer Rate: {:.2} KB/s", transfer_rate_kb_per_sec);
+            }
+        }
+        disk.last_performance = Some(current_performance);
+
+        *last_measurement_time = Instant::now();
+    }
+}
+
+// FROM C++ https://stackoverflow.com/a/30451751 MY CREATIVE INVERTION AND TRIAL AND ERROR METHOD (It works) and winapi docs and frineds help
 fn get_disk_performance(disk_name: &str) -> Option<DISK_PERFORMANCE> {
     unsafe {
         let dev = CreateFileA(
@@ -589,7 +496,7 @@ impl eframe::App for ProcessManagerApp {
 
             ui.separator();
 
-            ui.label(RichText::new(&self.cpu_informations.cpu_brand).heading());
+            ui.label(RichText::new(&self.cpu_informations.cpu_brand).heading().color(Color32::from_rgb(210, 151, 49)));
             match &self.cpu_informations.os_version {
                 Some(value) => ui.label(RichText::new(format!("os version: {}", value))),
                 _ => { return; }
@@ -765,10 +672,15 @@ impl eframe::App for ProcessManagerApp {
                                 .show_axes([false, true])
                                 .allow_scroll(false)
                                 .allow_drag(false)
+                                .legend(Legend::default().background_alpha(0.0).position(Corner::RightTop))
                                 .show(inner_ui, |plot_ui|{
-                                    plot_ui.line(Line::new(PlotPoints::default()));
-                                    plot_ui.set_plot_bounds(plot_bounds);
-                                    
+                                    let transfer_line: Vec<[f64; 2]> = {
+                                        disk.plot_points.data_iter().enumerate().map(|(index, &i)| {
+                                            [index as f64, i as f64]
+                                        }).collect()
+                                    };
+                                    plot_ui.line(Line::new(transfer_line).name("transfer_rate(KB/s)").color(Color32::GREEN).width(0.4));
+                                    plot_ui.set_plot_bounds(PlotBounds::from_min_max([0.0, 0.0], [20.0, (disk.y_max_bound + (disk.y_max_bound * 0.23)) as f64]));
                                 });
                         });
                     });
@@ -865,6 +777,9 @@ struct DiskInformations{
     kind: String,
     file_system: String,
     is_removable: String,
+    last_performance: Option<DISK_PERFORMANCE>,
+    plot_points: Data<f32>,
+    y_max_bound: f32,
 }
 
 struct NetworkInformations {
