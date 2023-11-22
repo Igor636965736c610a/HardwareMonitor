@@ -1,11 +1,11 @@
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashMap};
 use std::ffi::CString;
 use std::time::Instant;
 use egui::epaint::Hsva;
 use egui::scroll_area::ScrollBarVisibility;
-use egui::{SidePanel, RichText, Color32, Layout, Align, plot, ScrollArea};
+use egui::{SidePanel, RichText, Color32, Layout, Align, plot, ScrollArea, Grid, WidgetInfo, Label, Sense};
 use egui::plot::{Line, Legend, PlotBounds, Plot, Corner};
-use sysinfo::{NetworkExt, NetworksExt, System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind, DiskKind};
+use sysinfo::{NetworkExt, NetworksExt, System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind, DiskKind, ProcessRefreshKind, Pid, Process};
 use winapi::um::ioapiset::DeviceIoControl;
 use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE};
 use std::sync::Arc;
@@ -40,11 +40,14 @@ pub struct ProcessManagerAppMutexData{
     memory_usage_data_points: Data<f32>,
     disks_informations: Vec<DiskInformations>,
     swap_usage_data_points: Data<f32>,
-    network_y_plot_bound: f64
+    network_y_plot_bound: f64,
+    system: System,
+    process_informations: ProcessesInformations
 }
 
 impl ProcessManagerApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, sys: &mut System) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut sys = System::new_all();
         sys.refresh_all();
         let cpu_brand = sys.global_cpu_info().brand().to_string();
         let host_name = sys.host_name();
@@ -154,7 +157,9 @@ impl ProcessManagerApp {
             cpus_performance_data_points,
             network_informations,
             disks_informations,
-            network_y_plot_bound: 100.0
+            network_y_plot_bound: 100.0,
+            system: sys,
+            process_informations: ProcessesInformations { clicked_process: None }
         }));
 
         Self {
@@ -170,7 +175,7 @@ impl ProcessManagerApp {
         }
     }
 
-    pub fn start_updating_system_info(&self, mut sys: System)
+    pub fn start_updating_system_info(&self)
     {
         let arc_process_manager_mutex_data = Arc::clone(&self.process_manager_mutex_data);
 
@@ -179,7 +184,8 @@ impl ProcessManagerApp {
         thread::spawn(move || {
             loop {
                 {
-                    let process_manager_mutex_data = &mut arc_process_manager_mutex_data.lock().unwrap();
+                    let process_manager_mutex_data = &mut *arc_process_manager_mutex_data.lock().unwrap();
+                    let sys = &mut process_manager_mutex_data.system;
 
                     sys.refresh_specifics(RefreshKind::everything()
                         .without_components()
@@ -189,6 +195,9 @@ impl ProcessManagerApp {
                     let processor = sys.global_cpu_info().cpu_usage();
                     let memory = (sys.used_memory() as f64 / sys.total_memory() as f64) * 100.0;
                     let swap =  (sys.used_swap() as f64 / sys.total_swap() as f64) * 100.0;
+
+                    let x: &HashMap<Pid, Process> = sys.processes();
+                    println!("{}", x.capacity());
 
                     sys.cpus().iter().for_each(|x|{
                         let cpu_data = process_manager_mutex_data.cpus_performance_data_points.iter_mut().find(|y| y.name == x.name());
@@ -341,8 +350,6 @@ fn set_disk_transfer(disk: &mut DiskInformations, last_measurement_time: &mut In
                 // transfer spped/rate (KB/s)
                 let transfer_rate_kb_per_sec = (total_diff as f64 / 1024.0) / elapsed_time;
                 disk.plot_points.push(transfer_rate_kb_per_sec as f32);
-
-                println!("Transfer Rate: {:.2} KB/s", transfer_rate_kb_per_sec);
             }
         }
         disk.last_performance = Some(current_performance);
@@ -429,7 +436,7 @@ impl eframe::App for ProcessManagerApp {
         let mut max_y_network_plot_bound = mutex_data.network_y_plot_bound;
         max_y_network_plot_bound += max_y_network_plot_bound * 0.19;
 
-        SidePanel::left("left_panel1").show(ctx, |ui|{
+        SidePanel::left("left_panel1").resizable(false).show(ctx, |ui|{
             ui.set_max_width(0.32 * window_size.x);
             ui.set_max_height(0.32 * window_size.y);
             
@@ -566,7 +573,7 @@ impl eframe::App for ProcessManagerApp {
             });
         });
 
-        SidePanel::left("MEMORY").show(ctx, |ui|{
+        SidePanel::left("MEMORY").resizable(false).show(ctx, |ui|{
             let plot = Plot::new("memory_plot")
                 .show_axes([false, true])
                 .height(0.325 * window_size.y)
@@ -686,16 +693,28 @@ impl eframe::App for ProcessManagerApp {
                     });
                 });
             });
-            // Grid::new("grid1").striped(true)
-            // .num_columns(6)
-            // .show(ui, |ui| {
-            //     ui.label("Kolumna 1");
-            //     ui.label("Kolumna 2");
-            //     ui.label("Kolumna 3");
-            //     ui.label("Kolumna 4");
-            //     ui.label("Kolumna 5");
-            //     ui.label("Kolumna 6");
-            // });
+        });
+
+        SidePanel::left("Processes").resizable(false).show(ctx, |ui|{
+
+            Grid::new("grid1")
+                .num_columns(5)
+                .show(ui, |ui| {
+
+                    
+                    let xx = mutex_data.system.processes().iter().next().unwrap().0;
+                    mutex_data.process_informations.clicked_process = Some(*xx);
+
+
+                    ui.add(Label::new("Kolumna 1").sense(Sense::click()));    //.sense(Sense::click())).clicked();
+                    ui.label("Kolumna 2");
+                    ui.label("Kolumna 3");
+                    ui.label("Kolumna 4");
+                    ui.label("Kolumna 5");
+                });
+            
+            
+
         });
         ctx.request_repaint_after(Duration::from_millis(33));
     }
@@ -795,4 +814,8 @@ struct NetworkInformations {
 struct NetworkDisplay {
     recived_plot_points: Data<u64>,
     transmitted_plot_points: Data<u64>,
+}
+
+struct ProcessesInformations {
+    clicked_process: Option<Pid>,
 }
