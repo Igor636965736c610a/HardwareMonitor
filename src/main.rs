@@ -4,6 +4,7 @@
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
+    use sysinfo::{SystemExt, System};
 
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
 
@@ -12,10 +13,12 @@ fn main() -> eframe::Result<()> {
         "HardwareMonitor",
         native_options,
         Box::new(|cc| {
+            
+            let mut system = System::new_all();
 
-            let app = ProcessManager::ProcessManagerApp::new(cc);
+            let app = ProcessManager::ProcessManagerApp::new(cc, &mut system);
 
-            app.start_updating_system_info();
+            app.start_updating_system_info(system);
             
             Box::new(app)
         }),
