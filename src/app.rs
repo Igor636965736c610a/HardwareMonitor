@@ -3,9 +3,10 @@ use std::ffi::CString;
 use std::time::Instant;
 use egui::epaint::Hsva;
 use egui::scroll_area::ScrollBarVisibility;
-use egui::{SidePanel, RichText, Color32, Layout, Align, plot, ScrollArea, Grid, WidgetInfo, Label, Sense};
+use egui::{SidePanel, RichText, Color32, Layout, Align, plot, ScrollArea};
 use egui::plot::{Line, Legend, PlotBounds, Plot, Corner};
-use sysinfo::{NetworkExt, NetworksExt, System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind, DiskKind, ProcessRefreshKind, Pid, Process};
+use itertools::Itertools;
+use sysinfo::{NetworkExt, NetworksExt, System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind, DiskKind, Pid, ProcessExt, Process};
 use winapi::um::ioapiset::DeviceIoControl;
 use winapi::um::winnt::{FILE_SHARE_READ, FILE_SHARE_WRITE};
 use std::sync::Arc;
@@ -19,6 +20,7 @@ use winapi::um::fileapi::{CreateFileA, OPEN_EXISTING};
 use winapi::um::winioctl::{IOCTL_DISK_PERFORMANCE, DISK_PERFORMANCE};
 use winapi::shared::minwindef::{DWORD, FALSE};
 use winapi::shared::ntdef::HANDLE;
+use rand::prelude::*;
 
 
 //#[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -41,8 +43,9 @@ pub struct ProcessManagerAppMutexData{
     disks_informations: Vec<DiskInformations>,
     swap_usage_data_points: Data<f32>,
     network_y_plot_bound: f64,
-    system: System,
-    process_informations: ProcessesInformations
+    process_informations: Vec<ProcessesInformations>,
+    clicked_process: Option<Pid>,
+    system: System
 }
 
 impl ProcessManagerApp {
@@ -158,8 +161,9 @@ impl ProcessManagerApp {
             network_informations,
             disks_informations,
             network_y_plot_bound: 100.0,
-            system: sys,
-            process_informations: ProcessesInformations { clicked_process: None }
+            process_informations: vec![],
+            clicked_process: None,
+            system: sys
         }));
 
         Self {
@@ -196,9 +200,6 @@ impl ProcessManagerApp {
                     let memory = (sys.used_memory() as f64 / sys.total_memory() as f64) * 100.0;
                     let swap =  (sys.used_swap() as f64 / sys.total_swap() as f64) * 100.0;
 
-                    let x: &HashMap<Pid, Process> = sys.processes();
-                    println!("{}", x.capacity());
-
                     sys.cpus().iter().for_each(|x|{
                         let cpu_data = process_manager_mutex_data.cpus_performance_data_points.iter_mut().find(|y| y.name == x.name());
                         match cpu_data {
@@ -226,6 +227,46 @@ impl ProcessManagerApp {
                         }
                     });
 
+                    let processes_info: Vec<ProcessesInformations> = sys.processes()
+                        .iter()
+                        .group_by(|x| match x.1.parent() {
+                            Some(value) => { value }
+                            None => Pid::from(rand::thread_rng().gen_range(10_000..100_000))
+                        }).into_iter().map(|x|{
+                            let inner_vec: Vec<(&Pid, &Process)> = x.1.collect();
+ 
+                            ProcessesInformations {
+                                pid: x.0,
+                                name: inner_vec.iter().next().unwrap().1.name().to_string(),
+                                cpu: inner_vec.iter().map(|y| y.1.cpu_usage()).sum(),
+                                memory: inner_vec.iter().map(|y| y.1.memory() as f32).sum(),
+                                disk: inner_vec.iter().map(|y| (y.1.disk_usage().read_bytes + y.1.disk_usage().written_bytes) as f32).sum(),
+                                pids: inner_vec.iter().map(|y| *y.0).collect(),
+                            }
+                        }).collect();
+
+                    process_manager_mutex_data.process_informations = processes_info;
+
+                    for ele in &process_manager_mutex_data.process_informations {
+                        println!("{}", ele.name);
+                        println!("{:?}", ele.pids);
+                        println!();
+                    }
+
+                    // let z = test.into_iter().map(|x|{
+                    //     let ttt = ProcessesInformations {
+                    //         pid: x.0,
+                    //         name: x.1.next().unwrap().1.name().to_string(),
+                    //         cpu: x.1.map(|y| y.1.cpu_usage()).sum(),
+                    //         memory: x.1.map(|y| y.1.memory() as f32).sum(),
+                    //         disk: x.1.map(|y| (y.1.disk_usage().read_bytes + y.1.disk_usage().written_bytes) as f32).sum(),
+                    //         pids: x.1.map(|y| *y.0).collect(),
+                    //     };
+                        
+                    // });
+
+                    println!("\n");
+                    println!("\n");
                     sys.disks().iter().for_each(|x|{
                         let disk = process_manager_mutex_data.disks_informations.iter_mut().find(|disk| 
                             disk.mount_point.trim() == format!("{:?}", x.mount_point()).replace("\"", "").trim().to_string()).unwrap();
@@ -412,7 +453,7 @@ impl eframe::App for ProcessManagerApp {
         let window_size = _frame.info().window_info.size;
 
         let mutex_data_arc = Arc::clone(&self.process_manager_mutex_data);
-        let mut mutex_data = mutex_data_arc.lock().unwrap();
+        let mutex_data = &mut *mutex_data_arc.lock().unwrap();
 
         let cpu_points: Vec<[f64; 2]> = {
             mutex_data.cpu_performance_data_points.data_iter().enumerate().map(|(index, &i)| {
@@ -695,27 +736,59 @@ impl eframe::App for ProcessManagerApp {
             });
         });
 
-        SidePanel::left("Processes").resizable(false).show(ctx, |ui|{
+        // SidePanel::left("Processes").resizable(false).show(ctx, |ui|{
+        //     ui.set_width(0.355 * window_size.x);
 
-            Grid::new("grid1")
-                .num_columns(5)
-                .show(ui, |ui| {
+            // ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |inner_ui|{
+            //     Grid::new("grid1")
+            //         .num_columns(5)
+            //         .striped(false).spacing([19.0, Default::default()])
+            //         .show(inner_ui, |inner_ui| {
 
-                    
-                    let xx = mutex_data.system.processes().iter().next().unwrap().0;
-                    mutex_data.process_informations.clicked_process = Some(*xx);
+            //             let color = Color32::from_rgb(210, 151, 49);
+            //             inner_ui.colored_label(color, "NAME");
+            //             inner_ui.colored_label(color, "CPU");
+            //             inner_ui.colored_label(color, "MEMORY");
+            //             inner_ui.colored_label(color, "DISK");
 
+            //             inner_ui.end_row();
 
-                    ui.add(Label::new("Kolumna 1").sense(Sense::click()));    //.sense(Sense::click())).clicked();
-                    ui.label("Kolumna 2");
-                    ui.label("Kolumna 3");
-                    ui.label("Kolumna 4");
-                    ui.label("Kolumna 5");
-                });
-            
-            
+            //             // mutex_data.system.processes().iter().group_by(|x| x.1.name())
+            //             //     .into_iter().map_into()
+            //             //     .for_each(|(name, grouping_processes)|{
 
-        });
+            //             //     let inner_vec: Vec<(&Pid, &Process)> = grouping_processes.collect();
+
+            //             //     let cpu_usage: f32 = inner_vec.iter().map(|x| x.1.cpu_usage()).sum();
+            //             //     let memory_usage: f32 = inner_vec.iter().map(|x| x.1.memory() as f32).sum();
+            //             //     let read_disk_usage: f32 = inner_vec.iter().map(|x| x.1.disk_usage().read_bytes as f32).sum();
+            //             //     let write_disk_usage: f32 = inner_vec.iter().map(|x| x.1.disk_usage().written_bytes as f32).sum();
+                            
+            //             //     inner_ui.add(Label::new(format!("{}", name)).sense(Sense::click())).clicked().then(||{
+            //             //         match &mutex_data.process_informations.clicked_process {
+            //             //             Some(value) => {
+            //             //                 if value.0 != name.to_string() {
+            //             //                     mutex_data.process_informations.clicked_process = Some((name.to_string(), inner_vec.iter().map(|x| *x.0).collect()));
+            //             //                 }
+            //             //                 else {
+            //             //                     mutex_data.process_informations.clicked_process = None;
+            //             //                 }
+            //             //             }
+            //             //             None => {
+            //             //                 mutex_data.process_informations.clicked_process = Some((name.to_string(), inner_vec.iter().map(|x| *x.0).collect()));
+            //             //             }
+            //             //         }
+            //             //     });
+
+            //             //     inner_ui.label(format!("{:.1}", cpu_usage));
+            //             //     inner_ui.label(format!("{:.1}", memory_usage / 1024.0));
+            //             //     inner_ui.label(format!("{:.1}", (read_disk_usage + write_disk_usage) / 1024.0));
+    
+            //                 inner_ui.end_row();
+            //             });
+            //         });
+            //     });
+            // });
         ctx.request_repaint_after(Duration::from_millis(33));
     }
 }
@@ -817,5 +890,10 @@ struct NetworkDisplay {
 }
 
 struct ProcessesInformations {
-    clicked_process: Option<Pid>,
+    pid: Pid,
+    name: String,
+    cpu: f32,
+    memory: f32,
+    disk: f32,
+    pids: Vec<Pid>
 }
