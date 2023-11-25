@@ -1,9 +1,9 @@
 # HardwareMonitor
 My own cool widows process manager
 
-![Issues](https://img.shields.io/github/issues/HardwareMonitor/HardwareMonitor)
-![License](https://img.shields.io/github/license/HardwareMonitor/HardwareMonitor)
-![GitHub stars](https://img.shields.io/github/stars/HardwareMonitor/HardwareMonitor)
+![Issues](https://img.shields.io/github/issues/Igor636965736c610a/HardwareMonitor)
+![License](https://img.shields.io/github/license/Igor636965736c610a/HardwareMonitor)
+![GitHub stars](https://img.shields.io/github/stars/Igor636965736c610a/HardwareMonitor)
 
 ##About
 Cool process manager and hardware monitor in one on to another monitor writed in Rust - egui
