@@ -257,24 +257,6 @@ impl ProcessManagerApp {
                             })
                         }).collect();
 
-                    //println!("{:?}", process_manager_mutex_data.clicked_process);
-                    // match process_manager_mutex_data.clicked_process {
-                    //     Some(value) => {
-                    //         println!("{:?}", sys.processes()[&value].name());
-                    //     }
-                    //     None => {
-
-                    //     }
-                    // }
-
-                    // process_manager_mutex_data.process_informations = processes_info;
-
-                    // for ele in &process_manager_mutex_data.process_informations {
-                    //     println!("{}", ele.name);
-                    //     println!("{:?}", ele.pids);
-                    //     println!();
-                    // }
-
                     sys.disks().iter().for_each(|x|{
                         let disk = process_manager_mutex_data.disks_informations.iter_mut().find(|disk| 
                             disk.mount_point.trim() == format!("{:?}", x.mount_point()).replace("\"", "").trim().to_string()).unwrap();
