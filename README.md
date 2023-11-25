@@ -1,5 +1,5 @@
 # HardwareMonitor
-My own cool widows process manager
+My own cool windows process manager
 
 ![Issues](https://img.shields.io/github/issues/Igor636965736c610a/HardwareMonitor)
 ![License](https://img.shields.io/github/license/Igor636965736c610a/HardwareMonitor)
