@@ -5,7 +5,7 @@ My own cool widows process manager
 ![License](https://img.shields.io/github/license/Igor636965736c610a/HardwareMonitor)
 ![GitHub stars](https://img.shields.io/github/stars/Igor636965736c610a/HardwareMonitor)
 
-##About
+## About
 Cool process manager and hardware monitor in one on to another monitor writed in Rust - egui
 
 > [!IMPORTANT]
