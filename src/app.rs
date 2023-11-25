@@ -3,7 +3,7 @@ use std::ffi::CString;
 use std::time::Instant;
 use egui::epaint::Hsva;
 use egui::scroll_area::ScrollBarVisibility;
-use egui::{SidePanel, RichText, Color32, Layout, Align, plot, ScrollArea, Grid, Label, Sense};
+use egui::{SidePanel, RichText, Color32, Layout, Align, plot, ScrollArea, Grid, Label, Sense, Ui, Rect, Pos2};
 use egui::plot::{Line, Legend, PlotBounds, Plot, Corner};
 use itertools::Itertools;
 use sysinfo::{NetworkExt, NetworksExt, System, SystemExt, CpuExt, MacAddr, Cpu, DiskExt, RefreshKind, DiskKind, Pid, ProcessExt, Process, DiskUsage};
@@ -45,10 +45,13 @@ pub struct ProcessManagerAppMutexData{
     network_y_plot_bound: f64,
     process_informations: HashMap<Pid, ProcessInformations>,
     clicked_process: Option<Pid>,
+    processes_sort_option: ProcessesSortOption,
+    system: System
 }
 
 impl ProcessManagerApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, sys: &mut System) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut sys = System::new_all(); 
         sys.refresh_all();
         let cpu_brand = sys.global_cpu_info().brand().to_string();
         let host_name = sys.host_name();
@@ -161,6 +164,8 @@ impl ProcessManagerApp {
             network_y_plot_bound: 100.0,
             process_informations: HashMap::new(),
             clicked_process: None,
+            processes_sort_option: ProcessesSortOption::Memory,
+            system: sys,
         }));
 
         Self {
@@ -176,7 +181,7 @@ impl ProcessManagerApp {
         }
     }
 
-    pub fn start_updating_system_info(&self, mut sys: System)
+    pub fn start_updating_system_info(&self)
     {
         let arc_process_manager_mutex_data = Arc::clone(&self.process_manager_mutex_data);
 
@@ -186,6 +191,7 @@ impl ProcessManagerApp {
             loop {
                 {
                     let process_manager_mutex_data = &mut *arc_process_manager_mutex_data.lock().unwrap();
+                    let sys = &mut process_manager_mutex_data.system;
 
                     sys.refresh_specifics(RefreshKind::everything()
                         .without_components()
@@ -247,7 +253,7 @@ impl ProcessManagerApp {
                                 cpu: cpu,
                                 memory: inner_vec.iter().map(|y| y.memory as f32).sum(),
                                 disk: inner_vec.iter().map(|y| y.disk).sum(),
-                                pids: inner_vec,
+                                child_processes: inner_vec,
                             })
                         }).collect();
 
@@ -741,44 +747,150 @@ impl eframe::App for ProcessManagerApp {
         SidePanel::left("Processes").resizable(false).show(ctx, |ui|{
             ui.set_width(0.355 * window_size.x);
 
+            match mutex_data.clicked_process {
+                Some(value) => {
+                    Grid::new("ClickedProcess")
+                    .num_columns(5)
+                    .striped(false)
+                    .spacing([17.0, 2.0])
+                    .show(ui, |inner_ui| {
+                        let color = Color32::LIGHT_BLUE;
+                        columns_definition_display(mutex_data, inner_ui, color);
+                        inner_ui.add(Label::new(RichText::new(format!("{}", '🗙')).color(color)).sense(Sense::click())).clicked().then(||{
+                            mutex_data.clicked_process = None;
+                        });
+                        
+                        inner_ui.end_row();
+                        
+                        let clicked_process = &mutex_data.process_informations.get(&value);
+
+                        match clicked_process {
+                            Some(clicked_process) => {
+                                inner_ui.with_layout(Layout::default(), |inner_ui|{
+                                    inner_ui.set_min_width(165.0);
+                                    inner_ui.set_max_width(165.0);
+                                    inner_ui.colored_label(color, format!("{} {}", clicked_process.name, '⏷'))
+                                });
+                                    
+                                inner_ui.colored_label(color,format!("{:.1}", clicked_process.cpu));
+                                inner_ui.colored_label(color,format!("{:.1}", clicked_process.memory / 1000.0 / 1000.0));
+                                inner_ui.colored_label(color,format!("{:.1}", clicked_process.disk / 1000.0 / 1000.0));
+                                inner_ui.add(Label::new(RichText::new(format!("{}", '🗙')).color(Color32::from_rgb(210, 151, 49))).sense(Sense::click())).clicked().then(||{
+                                    let process_to_kill = mutex_data.system.process(value);
+                                    match process_to_kill {
+                                        Some(value) => {
+                                            value.kill();
+                                        }
+                                        None => {
+                                        }
+                                    }
+                                });
+        
+                                inner_ui.end_row();
+        
+                                let sorted_processes = match mutex_data.processes_sort_option {
+                                    ProcessesSortOption::Memory => {
+                                        clicked_process.child_processes.iter()
+                                            .sorted_by(|a, b| a.memory.partial_cmp(&b.memory).unwrap().reverse())
+                                    }
+                                    ProcessesSortOption::Cpu => {
+                                        clicked_process.child_processes.iter()
+                                            .sorted_by(|a, b| a.cpu.partial_cmp(&b.cpu).unwrap().reverse())
+                                    }
+                                    ProcessesSortOption::Disk => {
+                                        clicked_process.child_processes.iter()
+                                            .sorted_by(|a, b| a.disk.partial_cmp(&b.disk).unwrap().reverse())
+                                    }
+                                };
+                                
+                                sorted_processes.for_each(|process|{
+                                    inner_ui.with_layout(Layout::default(), |inner_ui|{
+                                        inner_ui.set_min_width(165.0);
+                                        inner_ui.set_max_width(165.0);     
+                                        inner_ui.label(format!("{}", process.name));  
+                                    });
+                                    inner_ui.label(format!("{:.1}", process.cpu));
+                                    inner_ui.label(format!("{:.1}", process.memory / 1000.0 / 1000.0));
+                                    inner_ui.label(format!("{:.1}", process.disk / 1000.0 / 1000.0));
+                                    inner_ui.add(Label::new(RichText::new(format!("{}", '🗙')).color(Color32::from_rgb(210, 151, 49))).sense(Sense::click())).clicked().then(||{
+                                        let process_to_kill = mutex_data.system.process(process.pid);
+                                        match process_to_kill {
+                                            Some(value) => {
+                                                value.kill();
+                                            }
+                                            None => {
+                                            }
+                                        }
+                                    });
+                                    inner_ui.end_row();
+                                });
+                            }
+                            None => {
+
+                            }
+                        }
+
+                    });
+                }
+                None => {
+
+                }
+            }
+
+            ui.separator();
+
             ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |inner_ui|{
                 Grid::new("grid1")
                     .num_columns(5)
-                    .striped(false).spacing([18.0, 2.0])
+                    .striped(false)
+                    .spacing([17.0, 2.0])
                     .show(inner_ui, |inner_ui| {
-
                         let color = Color32::from_rgb(210, 151, 49);
-                        inner_ui.colored_label(color, format!("NAME {}", '⮟'));
-                        inner_ui.colored_label(color, "CPU ");
-                        inner_ui.colored_label(color, "MEMORY ");
-                        inner_ui.colored_label(color, "DISK ");
+                        columns_definition_display(mutex_data, inner_ui, color);
 
                         inner_ui.end_row();
 
-                        mutex_data.process_informations.iter_mut()
-                            .sorted_by(|a, b| a.1.memory.partial_cmp(&b.1.memory).unwrap().reverse())
-                            .for_each(|process|{
+                        let processes = &mutex_data.process_informations;
+                        let sorted_option = &mutex_data.processes_sort_option;
 
-                            inner_ui.add(Label::new(format!("{}", process.1.name)).sense(Sense::click())).clicked().then(||{
-                                match &mutex_data.clicked_process {
-                                    Some(value) => {
-                                        if *value != *process.0 {
+                        let sorted_processes = get_sorted_processes(sorted_option, processes);
+
+                        sorted_processes.for_each(|process|{
+                            
+                            inner_ui.with_layout(Layout::default(), |inner_ui|{
+                                inner_ui.set_min_width(165.0);
+                                inner_ui.set_max_width(165.0);     
+                                inner_ui.add(Label::new(format!("{}", process.1.name)).sense(Sense::click())).clicked().then(||{
+                                    match &mutex_data.clicked_process {
+                                        Some(value) => {
+                                            if *value != *process.0 {
+                                                mutex_data.clicked_process = Some(*process.0)
+                                            }
+                                            else {
+                                                mutex_data.clicked_process = None
+                                            }
+                                        }
+                                        None => {
                                             mutex_data.clicked_process = Some(*process.0)
                                         }
-                                        else {
-                                            mutex_data.clicked_process = None
-                                        }
                                     }
-                                    None => {
-                                        mutex_data.clicked_process = Some(*process.0)
-                                    }
-                                }
+                                });
                             });
-
+                                
                             inner_ui.label(format!("{:.1}", process.1.cpu));
                             inner_ui.label(format!("{:.1}", process.1.memory / 1000.0 / 1000.0));
                             inner_ui.label(format!("{:.1}", process.1.disk / 1000.0 / 1000.0));
-                            
+
+                            inner_ui.add(Label::new(RichText::new(format!("{}", '🗙')).color(color)).sense(Sense::click())).clicked().then(||{
+                                let process_to_kill = mutex_data.system.process(*process.0);
+                                match process_to_kill {
+                                    Some(value) => {
+                                        value.kill();
+                                    }
+                                    None => {
+                                    }
+                                }
+                            });
                             inner_ui.end_row();
                         });
                     });
@@ -786,6 +898,81 @@ impl eframe::App for ProcessManagerApp {
             });
         ctx.request_repaint_after(Duration::from_millis(33));
     }
+}
+
+fn get_sorted_processes<'a>(sorted_option: &'a ProcessesSortOption, processes: &'a HashMap<Pid, ProcessInformations>) -> std::vec::IntoIter<(&'a Pid, &'a ProcessInformations)> {
+    let sorted_processes = match sorted_option {
+        ProcessesSortOption::Memory => {
+            processes.iter()
+                .sorted_by(|a, b| a.1.memory.partial_cmp(&b.1.memory).unwrap().reverse())
+        }
+        ProcessesSortOption::Cpu => {
+            processes.iter()
+                .sorted_by(|a, b| a.1.cpu.partial_cmp(&b.1.cpu).unwrap().reverse())
+        }
+        ProcessesSortOption::Disk => {
+            processes.iter()
+                .sorted_by(|a, b| a.1.disk.partial_cmp(&b.1.disk).unwrap().reverse())
+        }
+    };
+    sorted_processes
+}
+
+fn columns_definition_display(mutex_data: &mut ProcessManagerAppMutexData, inner_ui: &mut Ui, color: Color32) {
+    let unicode_char = '⏷';
+    match mutex_data.processes_sort_option {
+        ProcessesSortOption::Memory => {
+            inner_ui.add(Label::new(RichText::new("NAME").color(color)));
+            inner_ui.add(Label::new(RichText::new("CPU ").color(color))
+                .sense(Sense::click()))
+                .clicked()
+                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Cpu);
+            inner_ui.add(Label::new(RichText::new(format!("MEMORY {}", unicode_char)).color(color))
+                .sense(Sense::click()))
+                .clicked()
+                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Memory);
+            inner_ui.add(Label::new(RichText::new("DISK ").color(color))
+                .sense(Sense::click()))
+                .clicked()
+                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Disk);
+        }
+        ProcessesSortOption::Cpu => {
+            inner_ui.add(Label::new(RichText::new("NAME").color(color)));
+            inner_ui.add(Label::new(RichText::new(format!("CPU {}", unicode_char)).color(color))
+                .sense(Sense::click()))
+                .clicked()
+                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Cpu);
+            inner_ui.add(Label::new(RichText::new("MEMORY ").color(color))
+                .sense(Sense::click()))
+                .clicked()
+                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Memory);
+            inner_ui.add(Label::new(RichText::new("DISK ").color(color))
+                .sense(Sense::click()))
+                .clicked()
+                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Disk);
+        }
+        ProcessesSortOption::Disk => {
+            inner_ui.add(Label::new(RichText::new("NAME").color(color)));
+            inner_ui.add(Label::new(RichText::new("CPU ").color(color))
+                .sense(Sense::click()))
+                .clicked()
+                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Cpu);
+            inner_ui.add(Label::new( RichText::new("MEMORY ").color(color))
+                .sense(Sense::click()))
+                .clicked()
+                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Memory);
+            inner_ui.add(Label::new( RichText::new(format!("DISK {}", unicode_char)).color(color))
+                .sense(Sense::click()))
+                .clicked()
+                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Disk);
+        }
+    }
+}
+
+pub enum ProcessesSortOption {
+    Cpu,
+    Memory,
+    Disk
 }
 
 pub struct Data<T>{
@@ -890,7 +1077,7 @@ struct ProcessInformations {
     cpu: f32,
     memory: f32,
     disk: f32,
-    pids: Vec<SecificProcess>
+    child_processes: Vec<SecificProcess>
 }
 
 struct SecificProcess {
