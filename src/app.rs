@@ -902,53 +902,34 @@ fn get_sorted_processes<'a>(sorted_option: &'a ProcessesSortOption, processes: &
 
 fn columns_definition_display(mutex_data: &mut ProcessManagerAppMutexData, inner_ui: &mut Ui, color: Color32) {
     let unicode_char = '⏷';
+    let mut memory_char = String::from(" ");
+    let mut cpu_char = String::from(" ");
+    let mut disk_char = String::from(" ");
     match mutex_data.processes_sort_option {
         ProcessesSortOption::Memory => {
-            inner_ui.add(Label::new(RichText::new("NAME").color(color)));
-            inner_ui.add(Label::new(RichText::new("CPU ").color(color))
-                .sense(Sense::click()))
-                .clicked()
-                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Cpu);
-            inner_ui.add(Label::new(RichText::new(format!("MEMORY {}", unicode_char)).color(color))
-                .sense(Sense::click()))
-                .clicked()
-                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Memory);
-            inner_ui.add(Label::new(RichText::new("DISK ").color(color))
-                .sense(Sense::click()))
-                .clicked()
-                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Disk);
+            memory_char = format!(" {}", unicode_char);
         }
         ProcessesSortOption::Cpu => {
-            inner_ui.add(Label::new(RichText::new("NAME").color(color)));
-            inner_ui.add(Label::new(RichText::new(format!("CPU {}", unicode_char)).color(color))
-                .sense(Sense::click()))
-                .clicked()
-                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Cpu);
-            inner_ui.add(Label::new(RichText::new("MEMORY ").color(color))
-                .sense(Sense::click()))
-                .clicked()
-                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Memory);
-            inner_ui.add(Label::new(RichText::new("DISK ").color(color))
-                .sense(Sense::click()))
-                .clicked()
-                .then(||mutex_data.processes_sort_option = ProcessesSortOption::Disk);
+            cpu_char = format!(" {}", unicode_char);
         }
         ProcessesSortOption::Disk => {
-            inner_ui.add(Label::new(RichText::new("NAME").color(color)));
-            inner_ui.add(Label::new(RichText::new("CPU ").color(color))
+            disk_char = format!(" {}", unicode_char);
+        }
+    }
+
+    inner_ui.add(Label::new(RichText::new("NAME").color(color)));
+            inner_ui.add(Label::new(RichText::new(format!("CPU {}", cpu_char)).color(color))
                 .sense(Sense::click()))
                 .clicked()
                 .then(||mutex_data.processes_sort_option = ProcessesSortOption::Cpu);
-            inner_ui.add(Label::new( RichText::new("MEMORY ").color(color))
+            inner_ui.add(Label::new(RichText::new(format!("MEMORY {}", memory_char)).color(color))
                 .sense(Sense::click()))
                 .clicked()
                 .then(||mutex_data.processes_sort_option = ProcessesSortOption::Memory);
-            inner_ui.add(Label::new( RichText::new(format!("DISK {}", unicode_char)).color(color))
+            inner_ui.add(Label::new(RichText::new(format!("DISK {}", disk_char)).color(color))
                 .sense(Sense::click()))
                 .clicked()
                 .then(||mutex_data.processes_sort_option = ProcessesSortOption::Disk);
-        }
-    }
 }
 
 pub enum ProcessesSortOption {
