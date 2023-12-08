@@ -18,7 +18,7 @@ git clone https://github.com/Igor636965736c610a/HardwareMonitor.git
 ```
 open cmd/PowerShell AS ADMINISTRATOR:exclamation:
 ```
-cargo run
+cargo run --release
 ```
 # Screenshot
 ![image](https://github.com/Igor636965736c610a/HardwareMonitor/assets/102369546/b976bef9-7983-4ebf-a978-18ff05a735c5)
