@@ -141,7 +141,7 @@ impl ProcessManagerApp {
                     mac_address: x.1.mac_address(),
                     is_display_on_plot: true,
                     network_display: None,
-                    total_errors_on_recived: 0,
+                    total_errors_on_received: 0,
                     total_errors_on_transmitted: 0,
                 }
             }).collect();
@@ -287,23 +287,23 @@ impl ProcessManagerApp {
                             .find(|y| y.1.mac_address().eq(&x.mac_address));
                         match net_data {
                             Some(data) => {
-                                x.total_errors_on_recived = data.1.total_errors_on_received();
+                                x.total_errors_on_received = data.1.total_errors_on_received();
                                 x.total_errors_on_transmitted = data.1.total_errors_on_transmitted();
                                 if x.is_display_on_plot {
-                                let recived = data.1.received();
+                                let received = data.1.received();
                                 let transmitted = data.1.transmitted();
                                     match &mut x.network_display {
                                         Some(value) => {
-                                            value.recived_plot_points.push(recived);
+                                            value.received_plot_points.push(received);
                                             value.transmitted_plot_points.push(transmitted);
                                         }
                                         None => {
-                                            let mut recived_points = Data::new(20);
+                                            let mut received_points = Data::new(20);
                                             let mut transmitted_points = Data::new(20);
-                                            recived_points.push(recived);
+                                            received_points.push(received);
                                             transmitted_points.push(transmitted);
                                             let network_display = NetworkDisplay {
-                                                recived_plot_points: recived_points,
+                                                received_plot_points: received_points,
                                                 transmitted_plot_points: transmitted_points
                                             };
 
@@ -327,7 +327,7 @@ impl ProcessManagerApp {
                     for info in &process_manager_mutex_data.network_informations {
                         if let Some(data) = &info.network_display {
                             if info.is_display_on_plot {
-                                for value in data.recived_plot_points.data_iter() {
+                                for value in data.received_plot_points.data_iter() {
                                     if *value > net_y_bound {
                                         net_y_bound = *value;
                                     }
@@ -566,13 +566,13 @@ impl eframe::App for ProcessManagerApp {
                                         [index as f64, i as f64]
                                     }).collect()
                                 };
-                                let recived_line: Vec<[f64; 2]> = {
-                                    points.recived_plot_points.data_iter().enumerate().map(|(index, &i)| {
+                                let received_line: Vec<[f64; 2]> = {
+                                    points.received_plot_points.data_iter().enumerate().map(|(index, &i)| {
                                         [index as f64, i as f64]
                                     }).collect()
                                 };
                                 plot_ui.line(Line::new(transmitted_line).name(format!("{}. bytes transmitted", x.number)));
-                                plot_ui.line(Line::new(recived_line).name(format!("{}. bytes recived", x.number)));
+                                plot_ui.line(Line::new(received_line).name(format!("{}. bytes received", x.number)));
                             }
                             None => {
                             }                         
@@ -1025,12 +1025,12 @@ struct NetworkInformations {
     mac_address: MacAddr,
     is_display_on_plot: bool,
     network_display: Option<NetworkDisplay>,
-    total_errors_on_recived: u64,
+    total_errors_on_received: u64,
     total_errors_on_transmitted: u64,
 }
 
 struct NetworkDisplay {
-    recived_plot_points: Data<u64>,
+    received_plot_points: Data<u64>,
     transmitted_plot_points: Data<u64>,
 }
 
