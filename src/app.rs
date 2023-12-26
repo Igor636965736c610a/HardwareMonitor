@@ -231,11 +231,11 @@ impl ProcessManagerApp {
 
                     process_manager_mutex_data.process_informations = sys.processes()
                         .iter()
-                        .group_by(|x| match x.1.parent() {
+                        .into_group_map_by(|x| match x.1.parent() {
                             Some(value) => { value }
                             None => Pid::from(rand::thread_rng().gen_range(10_000..100_000))
                         }).into_iter().map(|x|{
-                            let inner_vec: Vec<SecificProcess> = x.1.map(|col|{
+                            let inner_vec: Vec<SecificProcess> = x.1.iter().map(|col|{
                                 SecificProcess { 
                                     pid: *col.0, 
                                     name: col.1.name().to_string(), 
@@ -246,10 +246,11 @@ impl ProcessManagerApp {
 
                             let sum: f32 = inner_vec.iter().map(|y| y.cpu).sum();
                             let cpu = sum / sys.physical_core_count().unwrap_or(1) as f32;
+                            let name = inner_vec.iter().next().unwrap().name.clone();
  
                             (x.0, ProcessInformations {
                                 pid: x.0,
-                                name: inner_vec.iter().next().unwrap().name.clone(),
+                                name: name,
                                 cpu: cpu,
                                 memory: inner_vec.iter().map(|y| y.memory as f32).sum(),
                                 disk: inner_vec.iter().map(|y| y.disk).sum(),
@@ -786,6 +787,7 @@ impl eframe::App for ProcessManagerApp {
                                 };
                                 
                                 sorted_processes.for_each(|process|{
+                                    println!("{}", process.pid);
                                     inner_ui.with_layout(Layout::default(), |inner_ui|{
                                         inner_ui.set_min_width(165.0);
                                         inner_ui.set_max_width(165.0);     
