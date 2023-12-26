@@ -239,14 +239,13 @@ impl ProcessManagerApp {
                                 SecificProcess { 
                                     pid: *col.0, 
                                     name: col.1.name().to_string(), 
-                                    cpu: col.1.cpu_usage(), 
-                                    memory: col.1.memory() as f32, 
+                                    cpu: (col.1.cpu_usage() / sys.physical_core_count().unwrap() as f32), 
+                                    memory: col.1.memory() as f32 / 1_048_576.0, 
                                     disk: (col.1.disk_usage().read_bytes + col.1.disk_usage().written_bytes) as f32 }
                             }).collect();
 
-                            let sum: f32 = inner_vec.iter().map(|y| y.cpu).sum();
-                            let cpu = sum / sys.physical_core_count().unwrap_or(1) as f32;
-                            let name = inner_vec.iter().next().unwrap().name.clone();
+                            let cpu: f32 = inner_vec.iter().map(|y| y.cpu).sum();
+                            let name = inner_vec.iter().max_by_key(|x| x.memory as i32).unwrap().name.clone();
  
                             (x.0, ProcessInformations {
                                 pid: x.0,
@@ -756,7 +755,7 @@ impl eframe::App for ProcessManagerApp {
                                 });
                                     
                                 inner_ui.colored_label(color,format!("{:.1}", clicked_process.cpu));
-                                inner_ui.colored_label(color,format!("{:.1}", clicked_process.memory / 1000.0 / 1000.0));
+                                inner_ui.colored_label(color,format!("{:.1}", clicked_process.memory));
                                 inner_ui.colored_label(color,format!("{:.1}", clicked_process.disk / 1000.0 / 1000.0));
                                 inner_ui.add(Label::new(RichText::new(format!("{}", '🗙')).color(Color32::from_rgb(210, 151, 49))).sense(Sense::click())).clicked().then(||{
                                     let process_to_kill = mutex_data.system.process(value);
@@ -794,7 +793,7 @@ impl eframe::App for ProcessManagerApp {
                                         inner_ui.label(format!("{}", process.name));  
                                     });
                                     inner_ui.label(format!("{:.1}", process.cpu));
-                                    inner_ui.label(format!("{:.1}", process.memory / 1000.0 / 1000.0));
+                                    inner_ui.label(format!("{:.1}", process.memory));
                                     inner_ui.label(format!("{:.1}", process.disk / 1000.0 / 1000.0));
                                     inner_ui.add(Label::new(RichText::new(format!("{}", '🗙')).color(Color32::from_rgb(210, 151, 49))).sense(Sense::click())).clicked().then(||{
                                         let process_to_kill = mutex_data.system.process(process.pid);
@@ -862,7 +861,7 @@ impl eframe::App for ProcessManagerApp {
                             });
                                 
                             inner_ui.label(format!("{:.1}", process.1.cpu));
-                            inner_ui.label(format!("{:.1}", process.1.memory / 1000.0 / 1000.0));
+                            inner_ui.label(format!("{:.1}", process.1.memory));
                             inner_ui.label(format!("{:.1}", process.1.disk / 1000.0 / 1000.0));
 
                             inner_ui.add(Label::new(RichText::new(format!("{}", '🗙')).color(color)).sense(Sense::click())).clicked().then(||{
